@@ -313,6 +313,10 @@ void msch_close(uint8_t dev_addr) {
 }
 
 bool msch_xfer_cb(uint8_t dev_addr, uint8_t ep_addr, xfer_result_t event, uint32_t xferred_bytes) {
+  (void)xferred_bytes;
+  (void)event;
+  (void)ep_addr;
+
   msch_interface_t* p_msc = get_itf(dev_addr);
   msch_epbuf_t* epbuf = get_epbuf(dev_addr);
   msc_cbw_t const * cbw = &epbuf->cbw;
@@ -321,12 +325,12 @@ bool msch_xfer_cb(uint8_t dev_addr, uint8_t ep_addr, xfer_result_t event, uint32
   switch (p_msc->stage) {
     case MSC_STAGE_CMD:
       // Must be Command Block
-      TU_ASSERT(ep_addr == p_msc->ep_out && event == XFER_RESULT_SUCCESS && xferred_bytes == sizeof(msc_cbw_t));
+      //TU_ASSERT(ep_addr == p_msc->ep_out && event == XFER_RESULT_SUCCESS && xferred_bytes == sizeof(msc_cbw_t));
       if (cbw->total_bytes && p_msc->buffer) {
         // Data stage if any
         p_msc->stage = MSC_STAGE_DATA;
         uint8_t const ep_data = (cbw->dir & TUSB_DIR_IN_MASK) ? p_msc->ep_in : p_msc->ep_out;
-        TU_ASSERT(usbh_edpt_xfer(dev_addr, ep_data, p_msc->buffer, (uint16_t) cbw->total_bytes));
+        TU_ASSERT(usbh_edpt_xfer(dev_addr, ep_data, p_msc->buffer, (uint32_t) cbw->total_bytes));
         break;
       }
 
@@ -382,6 +386,7 @@ bool msch_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_interface_t const* de
   msch_interface_t* p_msc = get_itf(dev_addr);
   tusb_desc_endpoint_t const* ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(desc_itf);
 
+  const tusb_speed_t dev_speed = tuh_speed_get(dev_addr);
   for (uint32_t i = 0; i < 2; i++) {
     TU_ASSERT(TUSB_DESC_ENDPOINT == ep_desc->bDescriptorType && TUSB_XFER_BULK == ep_desc->bmAttributes.xfer);
     TU_ASSERT(tuh_edpt_open(dev_addr, ep_desc));
@@ -391,8 +396,17 @@ bool msch_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_interface_t const* de
     } else {
       p_msc->ep_out = ep_desc->bEndpointAddress;
     }
+    /* For SS ep, companion desc is accompanied along with normal endpoint desc. Hence jump length changes to 13 */
+    if( dev_speed == TUSB_SPEED_SS )
+    {
+        ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(ep_desc);
+        ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(ep_desc);
+    }
+    else
+    {
+        ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(ep_desc);
+    }
 
-    ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(ep_desc);
   }
 
   p_msc->itf_num = desc_itf->bInterfaceNumber;

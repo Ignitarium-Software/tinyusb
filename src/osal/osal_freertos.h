@@ -84,7 +84,7 @@ typedef struct
 // TASK API
 //--------------------------------------------------------------------+
 
-TU_ATTR_ALWAYS_INLINE static inline uint32_t _osal_ms2tick(uint32_t msec) {
+TU_ATTR_ALWAYS_INLINE static inline uint64_t _osal_ms2tick(uint32_t msec) {
   if ( msec == OSAL_TIMEOUT_WAIT_FOREVER ) return portMAX_DELAY;
   if ( msec == 0 ) return 0;
 

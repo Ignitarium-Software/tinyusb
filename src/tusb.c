@@ -211,7 +211,11 @@ bool tu_edpt_validate(tusb_desc_endpoint_t const* desc_ep, tusb_speed_t speed) {
     }
 
     case TUSB_XFER_BULK:
-      if (speed == TUSB_SPEED_HIGH) {
+      if (speed == TUSB_SPEED_SS) {
+        // Bulk SS must be EXACTLY 512
+        TU_ASSERT(max_packet_size == 1024);
+      }
+      else if (speed == TUSB_SPEED_HIGH) {
         // Bulk highspeed must be EXACTLY 512
         TU_ASSERT(max_packet_size == 512);
       } else {
@@ -476,7 +480,7 @@ uint32_t tu_edpt_stream_read(uint8_t hwid, tu_edpt_stream_t* s, void* buffer, ui
 #include <ctype.h>
 
 #if CFG_TUSB_DEBUG >= CFG_TUH_LOG_LEVEL || CFG_TUSB_DEBUG >= CFG_TUD_LOG_LEVEL
-char const* const tu_str_speed[] = {"Full", "Low", "High"};
+char const* const tu_str_speed[] = {"Full", "Low", "High", "Super Speed"};
 char const* const tu_str_std_request[] = {
     "Get Status",
     "Clear Feature",
