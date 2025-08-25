@@ -18,7 +18,7 @@ add_subdirectory(${FREERTOS_TOP_DIR}/tinyusb/src ${CMAKE_CURRENT_BINARY_DIR}/tin
 
 target_sources(agilex5-tinyusb
     PUBLIC
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/hcd_socfpga.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc2/hcd_dwc2.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/socfpga_common.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/msc_app.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/usb_main.c

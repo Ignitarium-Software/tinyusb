@@ -90,13 +90,6 @@ typedef struct {
   };
 } hcd_event_t;
 
-typedef struct {
-  uint8_t rhport;
-  uint8_t hub_addr;
-  uint8_t hub_port;
-  uint8_t speed;
-} hcd_devtree_info_t;
-
 //--------------------------------------------------------------------+
 // Memory API
 //--------------------------------------------------------------------+
@@ -163,13 +156,14 @@ void hcd_device_close(uint8_t rhport, uint8_t dev_addr);
 //--------------------------------------------------------------------+
 
 // Open an endpoint
+// return true if successfully opened or endpoint is currently opened
 bool hcd_edpt_open(uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t const * ep_desc);
 
-//Submit a normal endpoint transfer
-bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t *buffer, uint32_t buflen);
+// Close an endpoint
+bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr);
 
 // Submit a transfer, when complete hcd_event_xfer_complete() must be invoked
-bool hcd_edpt_control_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer,const  tusb_control_request_t *req);
+bool hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint16_t buflen);
 
 // Abort a queued transfer. Note: it can only abort transfer that has not been started
 // Return true if a queued transfer is aborted, false if there is no transfer to abort
@@ -182,35 +176,8 @@ bool hcd_setup_send(uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[8]
 bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr);
 
 //--------------------------------------------------------------------+
-// xHCI APIs
-//--------------------------------------------------------------------+
-void hcd_update_device_address(void);
-
-//evalute context command
-bool hcd_evaluate_xhci_context(void);
-
-//send xhci enable slot command
-bool hcd_enable_slot(void);
-
-//send xhci address device command
-bool hcd_send_address_cmd(void);
-
-bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg);
-bool hcd_parse_conf_descriptor(tusb_desc_configuration_t *desc);
-bool hcd_parse_device_descriptor(tusb_desc_device_t *desc);
-bool hcd_parse_bos_descriptor(tusb_desc_bos_t *desc);
-bool hcd_parse_string_descriptor(tusb_desc_string_t *str, int type);
-
-//--------------------------------------------------------------------+
 // USBH implemented API
 //--------------------------------------------------------------------+
-
-// Get device tree information of a device
-// USB device tree can be complicated and manged by USBH, this help HCD to retrieve
-// needed topology info to carry out its work
-extern void hcd_devtree_get_info(uint8_t dev_addr, hcd_devtree_info_t* devtree_info);
-
-//------------- Event API -------------//
 
 // Called by HCD to notify stack
 extern void hcd_event_handler(hcd_event_t const* event, bool in_isr);
@@ -258,4 +225,4 @@ void hcd_event_xfer_complete(uint8_t dev_addr, uint8_t ep_addr, uint32_t xferred
  }
 #endif
 
-#endif /* _TUSB_HCD_H_ */
+#endif
