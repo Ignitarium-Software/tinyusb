@@ -35,6 +35,7 @@
 // Debug level for DWC2
 #define DWC2_DEBUG    2
 
+#include "socfpga_rst_mngr.h"
 #include "host/hcd.h"
 #include "host/usbh.h"
 #include "dwc2_common.h"
@@ -364,6 +365,12 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
   tu_memclr(&_hcd_data, sizeof(_hcd_data));
 
+  if (rstmgr_deassert_reset(RST_USB0) != 0)
+  {
+      ERROR("Unable to deassdert the usb3 reset");
+      return false;
+  }
+
   // Core Initialization
   const bool is_highspeed = dwc2_core_is_highspeed(dwc2, TUSB_ROLE_HOST);
   const bool is_dma = dma_host_enabled(dwc2);
@@ -594,7 +601,7 @@ static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
     channel->hcintmsk = hcintmsk;
     dwc2->haintmsk |= TU_BIT(ch_id);
 
-    channel->hcdma = (uint32_t) edpt->buffer;
+    channel->hcdma = (uint32_t)(uintptr_t) edpt->buffer;
 
     if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
       channel_send_in_token(dwc2, channel);
@@ -605,8 +612,10 @@ static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
   } else {
     uint32_t hcintmsk = HCINT_NAK | HCINT_XACT_ERR | HCINT_STALL | HCINT_XFER_COMPLETE | HCINT_DATATOGGLE_ERR;
     if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
+      cache_force_invalidate(edpt->buffer, edpt->buflen);
       hcintmsk |= HCINT_BABBLE_ERR | HCINT_DATATOGGLE_ERR | HCINT_ACK;
     } else {
+      cache_force_write_back(edpt->buffer, edpt->buflen);
       hcintmsk |= HCINT_NYET;
       if (edpt->hcsplt_bm.split_en || hctsiz.do_ping) {
         hcintmsk |= HCINT_ACK;
@@ -658,6 +667,8 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * 
 
   edpt->buffer = buffer;
   edpt->buflen = buflen;
+
+  cache_force_write_back((void*)edpt->buffer, buflen);
 
   if (ep_num == 0) {
     // update ep_dir since control endpoint can switch direction
@@ -1131,7 +1142,6 @@ static bool handle_channel_out_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hc
   hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
   hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
 
   bool is_done = false;
@@ -1216,7 +1226,7 @@ static void handle_channel_irq(uint8_t rhport, bool in_isr) {
           is_done = handle_channel_in_dma(dwc2, ch_id, hcint);
           if (is_done && (channel->hcdma > xfer->xferred_bytes)) {
             // hcdma is increased by word --> need to align4
-            hcd_dcache_invalidate((void*) tu_align4(channel->hcdma - xfer->xferred_bytes), xfer->xferred_bytes);
+            hcd_dcache_invalidate((void*)(uintptr_t) tu_align4(channel->hcdma - xfer->xferred_bytes), xfer->xferred_bytes);
           }
         }
         #endif

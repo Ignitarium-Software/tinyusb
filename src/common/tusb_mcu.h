@@ -617,6 +617,17 @@
 
 #elif TU_CHECK_MCU(OPT_MCU_SOCFPGA)
   #define TUP_USBIP_DWC2
+  #if 0
+  #define CFG_TUH_MEM_DCACHE_ENABLE_DEFAULT        1
+  #define CFG_TUSB_MEM_DCACHE_LINE_SIZE_DEFAULT   64
+  #endif
+
+  #define CFG_TUH_MEM_DCACHE_ENABLE_DEFAULT 0
+  // Disable slave if DMA is enabled
+  #define CFG_TUD_DWC2_SLAVE_ENABLE_DEFAULT  !CFG_TUD_DWC2_DMA_ENABLE
+  #define CFG_TUH_DWC2_SLAVE_ENABLE_DEFAULT  !CFG_TUH_DWC2_DMA_ENABLE
+
+  // Enable dcache if DMA is enabled
 #endif
 
 //--------------------------------------------------------------------+
