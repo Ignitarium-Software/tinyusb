@@ -16,7 +16,7 @@ add_subdirectory(${FREERTOS_TOP_DIR}/tinyusb/src ${CMAKE_CURRENT_BINARY_DIR}/tin
 
 add_library(agilex5-tinyusb STATIC)
 
-target_compile_definitions(agilex5-tinyusb PUBLIC CFG_TUSB_MCU=OPT_MCU_SOCFPGA CFG_TUSB_OS=OPT_OS_FREERTOS BOARD_TUH_MAX_SPEED=${RHPORT_DEVICE_SPEED} CFG_TUH_DWC2_DMA_ENABLE=0)
+target_compile_definitions(agilex5-tinyusb PUBLIC CFG_TUSB_MCU=OPT_MCU_SOCFPGA CFG_TUSB_OS=OPT_OS_FREERTOS BOARD_TUH_MAX_SPEED=${RHPORT_DEVICE_SPEED})
 
 target_include_directories(agilex5-tinyusb PUBLIC
   ${FREERTOS_TOP_DIR}/samples/usb_otg

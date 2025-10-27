@@ -365,9 +365,15 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
   tu_memclr(&_hcd_data, sizeof(_hcd_data));
 
+  if (rstmgr_assert_reset(RST_USB0) != 0)
+  {
+      ERROR("Unable to assert the usb2 reset");
+      return false;
+  }
+
   if (rstmgr_deassert_reset(RST_USB0) != 0)
   {
-      ERROR("Unable to deassdert the usb3 reset");
+      ERROR("Unable to deassert reset");
       return false;
   }
 
@@ -407,7 +413,6 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   uint32_t gahbcfg = dwc2->gahbcfg & ~GAHBCFG_TX_FIFO_EPMTY_LVL;
   gahbcfg |= GAHBCFG_GINT;   // Enable global interrupt
   dwc2->gahbcfg = gahbcfg;
-
   return true;
 }
 
@@ -612,10 +617,8 @@ static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
   } else {
     uint32_t hcintmsk = HCINT_NAK | HCINT_XACT_ERR | HCINT_STALL | HCINT_XFER_COMPLETE | HCINT_DATATOGGLE_ERR;
     if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
-      cache_force_invalidate(edpt->buffer, edpt->buflen);
       hcintmsk |= HCINT_BABBLE_ERR | HCINT_DATATOGGLE_ERR | HCINT_ACK;
     } else {
-      cache_force_write_back(edpt->buffer, edpt->buflen);
       hcintmsk |= HCINT_NYET;
       if (edpt->hcsplt_bm.split_en || hctsiz.do_ping) {
         hcintmsk |= HCINT_ACK;
@@ -668,13 +671,10 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * 
   edpt->buffer = buffer;
   edpt->buflen = buflen;
 
-  cache_force_write_back((void*)edpt->buffer, buflen);
-
   if (ep_num == 0) {
     // update ep_dir since control endpoint can switch direction
     edpt->hcchar_bm.ep_dir = ep_dir;
   }
-
   return edpt_xfer_kickoff(dwc2, ep_id);
 }
 
