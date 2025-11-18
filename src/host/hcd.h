@@ -189,7 +189,7 @@ void hcd_dwc3_update_device_address(void);
 bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg);
 
 // Send xHCI set configuration command TRB
-void hcd_xhci_set_configuration()
+void hcd_xhci_set_configuration();
 
 //--------------------------------------------------------------------+
 // USBH implemented API
