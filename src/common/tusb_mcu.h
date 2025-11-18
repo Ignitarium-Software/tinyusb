@@ -621,6 +621,10 @@
   #define TUP_USBIP_DWC2_AT32
   #define TUP_DCD_ENDPOINT_MAX    8
 
+#elif TU_CHECK_MCU(OPT_MCU_SOCFPGA)
+  #define TUP_USBIP_DWC2
+  #define CFG_TUSB_MEM_DCACHE_LINE_SIZE_DEFAULT   64
+
 #endif
 
 //--------------------------------------------------------------------+
