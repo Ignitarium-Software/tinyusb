@@ -33,7 +33,7 @@
  extern "C" {
 #endif
 
-#define TUP_USBIP_CONTROLLER_NUM 2
+#define TUP_USBIP_CONTROLLER_NUM 3
 extern tusb_role_t _tusb_rhport_role[TUP_USBIP_CONTROLLER_NUM];
 
 //--------------------------------------------------------------------+

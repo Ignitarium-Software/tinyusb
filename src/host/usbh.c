@@ -1581,14 +1581,34 @@ static void process_enumeration(tuh_xfer_t* xfer) {
       new_dev->connected = 1;
       new_dev->bMaxPacketSize0 = desc_device->bMaxPacketSize0;
 
-      TU_ASSERT(tuh_address_set(0, new_addr, process_enumeration, ENUM_GET_DEVICE_DESC),);
-      break;
+      if( _usbh_data.controller_id == 1 || _usbh_data.controller_id == 2 )
+      {
+        hcd_dwc3_update_device_address();
+      }
+      else
+      {
+
+        TU_ASSERT(tuh_address_set(0, new_addr, process_enumeration, ENUM_GET_DEVICE_DESC),);
+        break;
+      }
+      TU_ATTR_FALLTHROUGH;
     }
 
     case ENUM_GET_DEVICE_DESC: {
       tusb_time_delay_ms_api(ENUM_SET_ADDRESS_RECOVERY_DELAY_MS); // set address recovery
 
-      const uint8_t new_addr = (uint8_t) tu_le16toh(xfer->setup->wValue);
+      uint8_t new_addr;
+
+      //For xHCI controller, set address request is already transferred after enable slot command
+      if( _usbh_data.controller_id == 1 || _usbh_data.controller_id == 2 )
+      {
+        new_addr = 1;
+      }
+      else
+      {
+        new_addr = (uint8_t) tu_le16toh(xfer->setup->wValue);
+      }
+
       usbh_device_t* new_dev = get_device(new_addr);
       TU_ASSERT(new_dev,);
       new_dev->addressed = 1;
@@ -1738,15 +1758,25 @@ static void process_enumeration(tuh_xfer_t* xfer) {
     case ENUM_SET_CONFIG: {
       uint8_t config_idx = (uint8_t) tu_le16toh(xfer->setup->wIndex);
       if (tuh_enum_descriptor_configuration_cb(daddr, config_idx, (const tusb_desc_configuration_t*) _usbh_epbuf.ctrl)) {
-        TU_ASSERT(tuh_configuration_set(daddr, config_idx+1, process_enumeration, ENUM_CONFIG_DRIVER),);
+        //For xHCI controller, set configuration request needs to be transferred separately via set configuration command
+        if( _usbh_data.controller_id == 1 || _usbh_data.controller_id == 2 )
+        {
+          TU_ASSERT(hcd_parse_full_conf_descriptor((tusb_desc_configuration_t*) _usbh_epbuf.ctrl),);
+          hcd_xhci_set_configuration();
+        }
+        else
+        {
+          TU_ASSERT(tuh_configuration_set(daddr, config_idx+1, process_enumeration, ENUM_CONFIG_DRIVER),);
+          break;
+        }
       } else {
         config_idx++;
         TU_ASSERT(config_idx < dev->bNumConfigurations,);
         TU_LOG_USBH("Get Configuration[%u] Descriptor (9 bytes)\r\n", config_idx);
         TU_ASSERT(tuh_descriptor_get_configuration(daddr, config_idx, _usbh_epbuf.ctrl, 9,
                                                    process_enumeration, ENUM_GET_FULL_CONFIG_DESC),);
+        break;
       }
-      break;
     }
 
     case ENUM_CONFIG_DRIVER: {

@@ -243,7 +243,10 @@ bool tu_edpt_validate(tusb_desc_endpoint_t const* desc_ep, tusb_speed_t speed, b
       if (speed == TUSB_SPEED_HIGH) {
         // Bulk highspeed must be EXACTLY 512
         TU_ASSERT(max_packet_size == 512);
-      } else {
+      } else if (speed == TUSB_SPEED_SS) {
+        // Bulk highspeed must be EXACTLY 1024
+        TU_ASSERT(max_packet_size == 1024);
+      }else {
         // Bulk fullspeed can only be 8, 16, 32, 64
         if (is_host && max_packet_size == 512) {
           // HACK: while in host mode, some device incorrectly always report 512 regardless of link speed
