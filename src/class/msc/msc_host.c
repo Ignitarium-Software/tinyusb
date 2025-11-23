@@ -410,7 +410,7 @@ bool msch_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_interface_t const* de
     else
     {
       ep_desc = (tusb_desc_endpoint_t const*) tu_desc_next(ep_desc);
-     }
+    }
   }
 
   p_msc->itf_num = desc_itf->bInterfaceNumber;
