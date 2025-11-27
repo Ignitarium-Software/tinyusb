@@ -190,7 +190,7 @@ bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr) {
 
 
 // Submit a transfer, when complete hcd_event_xfer_complete() must be invoked
-bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t buflen) {
+bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
 	return hcd_dwc2_edpt_xfer(rhport, dev_addr, ep_addr, buffer, buflen);

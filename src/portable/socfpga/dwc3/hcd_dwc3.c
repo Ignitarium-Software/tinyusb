@@ -326,7 +326,7 @@ bool hcd_dwc3_edpt_open( uint8_t rhport, uint8_t daddr,
     return true;
 }
 
-bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint16_t buflen)
+bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen)
 {
     const uint8_t ep_num = tu_edpt_number(ep_addr);
     const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
