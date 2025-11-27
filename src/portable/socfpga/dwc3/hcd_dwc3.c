@@ -244,11 +244,8 @@ tusb_speed_t hcd_dwc3_port_speed_get( uint8_t rhport )
     return ret;
 }
 
-void hcd_dwc3_device_close( uint8_t rhport, uint8_t dev_addr )
+void hcd_dwc3_device_close( uint8_t rhport )
 {
-#if 0
-    (void) dev_addr;
-
     uint32_t slotid;
 
     if (rhport == USB3_SS_PORT)
@@ -272,8 +269,8 @@ void hcd_dwc3_device_close( uint8_t rhport, uint8_t dev_addr )
 
         dealloc_usb_port(Usb3handle);
         device_addr = 0U;
+        usb_set_config = 0;
     }
-#endif
 }
 
 /*--------------------------------------------------------------------+

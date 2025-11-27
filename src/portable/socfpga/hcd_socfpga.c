@@ -161,7 +161,6 @@ void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
   }
   else
   {
-	hcd_dwc3_device_close(rhport, dev_addr);
   }
 }
 

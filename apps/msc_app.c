@@ -27,6 +27,7 @@
 #include "tusb.h"
 #include "osal_log.h"
 #include "socfpga_usb.h"
+#include "hcd_dwc3.h"
 
 #define MSC_BLOCK_SIZE (512)
 
@@ -90,6 +91,14 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
 void tuh_msc_umount_cb(uint8_t dev_addr)
 {
     msc_mount_complete = 0;
+
+    //for dwc3 controller, deinit sequence needs to be done after a device is unplugged
+    tuh_bus_info_t dev_info;
+    tuh_bus_info_get(dev_addr, &dev_info);
+    if( dev_info.rhport != SOCFPGA_USB2_OTG_PORT )
+    {
+        hcd_dwc3_device_close(dev_info.rhport);
+    }
     PRINT("A MassStorage device is unmounted, address - %d\r\n", dev_addr);
 }
 bool usb_disk_read(void *buffer, uint32_t lba, uint16_t count)
