@@ -26,8 +26,9 @@
 #include <ctype.h>
 #include "tusb.h"
 #include "osal_log.h"
+#include "socfpga_usb.h"
 
-void fatfs_test( void);
+#define MSC_BLOCK_SIZE (512)
 
 static volatile int msc_mount_complete = 0;
 static scsi_inquiry_resp_t inquiry_resp;
@@ -74,21 +75,7 @@ bool msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const * c
     /* MSC mount process completed */
     dev_block_count = block_count;
     msc_mount_complete = 1;
-#if 0
-	r_buffer = (uint8_t *)pvPortMallocCoherent(512);
-	w_buffer = (uint8_t *)pvPortMallocCoherent(512);
 
-	memset(r_buffer, '.', 512);
-	memset(w_buffer, '?', 512);
-
-    status_flag_cb = true;
-    tuh_msc_write10(dev_addr, 0, w_buffer, 10000, 1, disk_io_complete_fat, 0);
-    wait_for_disk_io_fat();
-
-    status_flag_cb = true;
-    tuh_msc_read10(dev_addr, 0, r_buffer, 10000, 1, disk_io_complete_fat, 0);
-    wait_for_disk_io_fat();
-#endif
     return true;
 }
 
@@ -113,12 +100,12 @@ bool usb_disk_read(void *buffer, uint32_t lba, uint16_t count)
     {
         return false;
     }
-	uint8_t *ptr = pvPortMallocCoherent(512*count);
-	
+
+    // cache invalidate operation is required before read operation for dwc2 controller.
+    usb_dcache_clean(buffer, MSC_BLOCK_SIZE*count);
     status_flag_cb = true;
-    tuh_msc_read10(dev_addr, lun, ptr, lba, count, disk_io_complete_fat, 0);
+    tuh_msc_read10(dev_addr, lun, buffer, lba, count, disk_io_complete_fat, 0);
     wait_for_disk_io_fat();
-	memcpy(buffer, ptr, 512*count);
 
     return true;
 }
