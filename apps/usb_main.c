@@ -12,7 +12,7 @@
 #define USB3_HS_PORT    (1)
 #define USB3_SS_PORT    (2)
 
-int usb3_wait_to_mount(int timeout)
+int usb_wait_to_mount(int timeout)
 {
     while (timeout >= 0)
     {
@@ -31,7 +31,7 @@ int usb3_wait_to_mount(int timeout)
     return 0;
 }
 
-void usb3_task(void *arg)
+void usb_task(void *arg)
 {
     (void)arg;
 
