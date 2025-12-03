@@ -27,18 +27,20 @@
 
 #include <math.h>
 #include "tusb.h"
-#include "socfpga_rst_mngr.h"
 #include "host/hcd.h"
-
-#include "dwc3.h"
-#include "xhci_commands.h"
-#include "xhci_endpoints.h"
-#include "xhci_interrupts.h"
-#include "xhci_doorbell.h"
-#include "hcd_dwc3.h"
-#include "socfpga_usb.h"
 #include "tusb_private.h"
-#include "osal_log.h"
+
+#if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
+  #include "socfpga_rst_mngr.h"
+  #include "dwc3.h"
+  #include "xhci_commands.h"
+  #include "xhci_endpoints.h"
+  #include "xhci_interrupts.h"
+  #include "xhci_doorbell.h"
+  #include "hcd_dwc3.h"
+  #include "osal_log.h"
+  #include "socfpga_cache.h"
+#endif
 
 #define USB3_HS_PORT (1)
 #define USB3_SS_PORT (2)
@@ -339,14 +341,14 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
       ring_xhci_ep0_db(&xhci_handle.op_regs);
 	  if( buffer != NULL )
 	  {
-        usb_dcache_invalidate(buffer, buflen);
+        socfpga_dcache_invalidate(buffer, buflen);
       }
     }
     else
     {
-	  if( dir == TUSB_DIR_OUT )
+      if( dir == TUSB_DIR_OUT )
 	  {
-        usb_dcache_clean(buffer, buflen); 
+        socfpga_dcache_clean(buffer, buflen);
 	  }
       endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
     }

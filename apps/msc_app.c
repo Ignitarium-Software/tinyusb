@@ -26,7 +26,7 @@
 #include <ctype.h>
 #include "tusb.h"
 #include "osal_log.h"
-#include "socfpga_usb.h"
+#include "socfpga_cache.h"
 #include "hcd_dwc3.h"
 
 #define MSC_BLOCK_SIZE (512)
@@ -111,7 +111,7 @@ bool usb_disk_read(void *buffer, uint32_t lba, uint16_t count)
     }
 
     // cache invalidate operation is required before read operation for dwc2 controller.
-    usb_dcache_clean(buffer, MSC_BLOCK_SIZE*count);
+    socfpga_dcache_clean(buffer, MSC_BLOCK_SIZE*count);
     status_flag_cb = true;
     tuh_msc_read10(dev_addr, lun, buffer, lba, count, disk_io_complete_fat, 0);
     wait_for_disk_io_fat();
