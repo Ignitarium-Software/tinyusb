@@ -42,64 +42,60 @@
   #include "socfpga_cache.h"
 #endif
 
-#define USB3_HS_PORT (1)
-#define USB3_SS_PORT (2)
-
 static void hcd_xhci_set_configuration();
 static void hcd_dwc3_update_device_address( uint8_t daddr );
 
 struct xhci_data xhci_handle __attribute__((aligned(64)));
-uint8_t device_addr = 0;
-
 static struct xhci_int_desc usb3_int_desc;
 static tusb_control_request_t ctrl_req;
 static int usb_set_config = 0;
+uint8_t device_addr = 0;
 
 bool hcd_dwc3_init( uint8_t rhport, const tusb_rhport_init_t *rh_init )
 {
-    xhci_int_ptr_t usb3_int_ptr = &usb3_int_desc;
-    (void) rh_init;
-    int ret;
+  xhci_int_ptr_t usb3_int_ptr = &usb3_int_desc;
+  (void) rh_init;
+  int ret;
 
-    if (rhport == USB3_SS_PORT)
+  if (rhport == SOCFPGA_USB3_SS_PORT)
+  {
+    usb3_int_ptr->int_handler = tusb_int_handler;
+    if (register_usb3ISR(usb3_int_ptr) == false)
     {
-        usb3_int_ptr->int_handler = tusb_int_handler;
-        if (register_usb3ISR(usb3_int_ptr) == false)
-        {
-            return false;
-        }
-
-        if (rstmgr_deassert_reset(RST_USB1) != 0)
-        {
-            ERROR("\r\n Unable to deassdert the usb3 reset \r\n");
-            return false;
-        }
-
-        ret = init_hcd_params();
-        if (ret != 0)
-        {
-            ERROR("hcd error -%d", ret);
-            return false;
-        }
-
-        ret = dwc3_init();
-        if (ret != 0)
-        {
-            ERROR("dwc3 Error -%d!!!", ret);
-            return false;
-        }
-
-        //clear xHCI data structure members
-        tu_memclr(&xhci_handle, sizeof(xhci_handle));
-
-        if( xhci_init(&xhci_handle) == false )
-		{
-            ERROR("xHCI init failed !!!");
-            return false;
-		}
+        return false;
     }
 
-    return true;
+    if (rstmgr_deassert_reset(RST_USB1) != 0)
+    {
+        ERROR("\r\n Unable to deassdert the usb3 reset \r\n");
+        return false;
+    }
+
+    ret = init_hcd_params();
+    if (ret != 0)
+    {
+        ERROR("hcd error -%d", ret);
+        return false;
+    }
+
+    ret = dwc3_init();
+    if (ret != 0)
+    {
+        ERROR("dwc3 Error -%d!!!", ret);
+        return false;
+    }
+
+    //clear xHCI data structure members
+    tu_memclr(&xhci_handle, sizeof(xhci_handle));
+
+    if( xhci_init(&xhci_handle) == false )
+    {
+      ERROR("xHCI init failed !!!");
+      return false;
+    }
+  }
+
+  return true;
 }
 bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
 {
@@ -108,22 +104,21 @@ bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
 
 void hcd_dwc3_int_enable( uint8_t rhport )
 {
-
-    switch (rhport)
-    {
-    case USB3_HS_PORT:
-        enable_xhci_interrupts();
-        break;
+  switch (rhport)
+  {
+    case SOCFPGA_USB3_HS_PORT:
+      enable_xhci_interrupts();
+      break;
 
     default: /* do nothing */
-        break;
-    }
+      break;
+  }
 }
 
 void hcd_dwc3_int_disable( uint8_t rhport )
 {
-    (void) rhport;
-    /* disable_xhci_interrupts(); */
+  (void) rhport;
+  /* disable_xhci_interrupts(); */
 }
 
 /*--------------------------------------------------------------------+
@@ -131,142 +126,139 @@ void hcd_dwc3_int_disable( uint8_t rhport )
  *--------------------------------------------------------------------+*/
 bool hcd_dwc3_port_connect_status( uint8_t rhport )
 {
-    bool ret;
+  bool ret;
 
-    ret = xhci_port_status(rhport);
+  ret = xhci_port_status(rhport);
 
-    return ret;
+  return ret;
 }
 
 void hcd_dwc3_port_reset( uint8_t rhport )
 {
-    (void) rhport;
-    reset_usb_port(rhport);
+  (void) rhport;
+  reset_usb_port(rhport);
 }
 
 static bool hcd_enable_slot( void )
 {
-    enable_slot_command(xhci_handle.xcr_ring);
+  enable_slot_command(xhci_handle.xcr_ring);
 
-    if (wait_for_command_completion_event(&xhci_handle,
-            ENABLE_SLOT_CMD) != 0)
-    {
-        return false;
-    }
+  if (wait_for_command_completion_event(&xhci_handle,
+          ENABLE_SLOT_CMD) != 0)
+  {
+    return false;
+  }
 
-    return true;
+  return true;
 }
 
 static bool hcd_send_address_cmd( void )
 {
-    int ret;
+  int ret;
 
-    update_device_dev_speed(&xhci_handle);
+  update_device_dev_speed(&xhci_handle);
 
-    ret = init_input_device_context(&xhci_handle);
-    if (ret != 0)
-    {
-        ERROR("XHCI Error -%d!!!", ret);
-        return false;
-    }
+  ret = init_input_device_context(&xhci_handle);
+  if (ret != 0)
+  {
+    ERROR("XHCI Error -%d!!!", ret);
+    return false;
+  }
 
-    update_dcbaa_entry(&xhci_handle);
+  update_dcbaa_entry(&xhci_handle);
 
-    set_device_address(&xhci_handle);
+  set_device_address(&xhci_handle);
 
-    if (wait_for_command_completion_event(&xhci_handle,
-            ADDRESS_DEVICE_CMD) != 0)
-    {
-        return false;
-    }
+  if (wait_for_command_completion_event(&xhci_handle,
+          ADDRESS_DEVICE_CMD) != 0)
+  {
+    return false;
+  }
 
-    update_device_address(&xhci_handle);
+  update_device_address(&xhci_handle);
 
-    if (xhci_handle.dev_data.dev_addr == 0U)
-    {
-        return false; /* device address can not be zero after address command is sent */
-    }
+  if (xhci_handle.dev_data.dev_addr == 0U)
+  {
+    return false; /* device address can not be zero after address command is sent */
+  }
 
-    display_xhci_device_params(&xhci_handle.dev_data);
-    display_ip_context(xhci_handle.ip_ctx);
-    display_op_context(xhci_handle.op_ctx);
-    display_event_trbs(&xhci_handle);
+  display_xhci_device_params(&xhci_handle.dev_data);
+  display_ip_context(xhci_handle.ip_ctx);
+  display_op_context(xhci_handle.op_ctx);
+  display_event_trbs(&xhci_handle);
 
-    return true;
+  return true;
 }
 
 static void hcd_dwc3_update_device_address( uint8_t daddr )
 {
-    device_addr = daddr;
+  device_addr = daddr;
 }
 
 void hcd_dwc3_port_reset_end( uint8_t rhport )
 {
+  (void) rhport;
+  TU_ASSERT(usb_port_reset_end(rhport),);
 
-    (void) rhport;
-    TU_ASSERT(usb_port_reset_end(rhport),);
+  hcd_enable_slot();
 
-    hcd_enable_slot();
-
-    hcd_send_address_cmd();
+  hcd_send_address_cmd();
 }
 
 tusb_speed_t hcd_dwc3_port_speed_get( uint8_t rhport )
 {
+  uint8_t dev_speed;
+  tusb_speed_t ret;
 
-    (void) rhport;
-    uint8_t dev_speed;
-    tusb_speed_t ret;
-
-    dev_speed = get_xhc_port_speed(rhport);
-    switch (dev_speed)
-    {
+  dev_speed = get_xhc_port_speed(rhport);
+  switch (dev_speed)
+  {
     case 4:
-        ret = TUSB_SPEED_SS;
-        break;
+      ret = TUSB_SPEED_SS;
+      break;
     case 3:
-        ret = TUSB_SPEED_HIGH;
-        break;
+      ret = TUSB_SPEED_HIGH;
+      break;
     case 2:
-        ret = TUSB_SPEED_FULL;
-        break;
+      ret = TUSB_SPEED_FULL;
+      break;
     case 1:
-        ret = TUSB_SPEED_LOW;
-        break;
+      ret = TUSB_SPEED_LOW;
+      break;
     default:
-        ret = TUSB_SPEED_INVALID;
-        break;
-    }
-    return ret;
+      ret = TUSB_SPEED_INVALID;
+      break;
+  }
+  return ret;
 }
 
 void hcd_dwc3_device_close( uint8_t rhport )
 {
-    uint32_t slotid;
+  uint32_t slotid;
 
-    if (rhport == USB3_SS_PORT)
+  if (rhport == SOCFPGA_USB3_SS_PORT)
+  {
+    /* Issue WR for usb3 ports only */
+    xhci_warm_reset(rhport);
+  }
+
+  slotid = xhci_handle.dev_data.slot_id;
+
+  if (slotid != 0U)
+  {
+    disable_slot_command(xhci_handle.xcr_ring, slotid);
+
+    if (wait_for_command_completion_event(&xhci_handle,
+            DISABLE_SLOT_CMD) != 0)
     {
-        /* Issue WR for usb3 ports only */
-        xhci_warm_reset(rhport);
+      ERROR("xHCI command failed");
+      return;
     }
 
-    slotid = xhci_handle.dev_data.slot_id;
-
-    if (slotid != 0U)
-    {
-        disable_slot_command(xhci_handle.xcr_ring, slotid);
-
-        if (wait_for_command_completion_event(&xhci_handle,
-                DISABLE_SLOT_CMD) != 0)
-        {
-            ERROR("xHCI command failed");
-            return;
-        }
-
-        dealloc_usb_port(&xhci_handle);
-        device_addr = 0U;
-        usb_set_config = 0;
-    }
+    dealloc_usb_port(&xhci_handle);
+    device_addr = 0U;
+    usb_set_config = 0;
+  }
 }
 
 /*--------------------------------------------------------------------+
@@ -274,295 +266,292 @@ void hcd_dwc3_device_close( uint8_t rhport )
  *--------------------------------------------------------------------+*/
 static void hcd_xhci_set_configuration()
 {
-        update_xhc_slot_context(&xhci_handle);
+  update_xhc_slot_context(&xhci_handle);
 
-        init_xhc_endpoint_context(&xhci_handle, BULK_OUT);
+  init_xhc_endpoint_context(&xhci_handle, BULK_OUT);
 
-        init_xhc_endpoint_context(&xhci_handle, BULK_IN);
+  init_xhc_endpoint_context(&xhci_handle, BULK_IN);
 
-        configure_endpoint(&xhci_handle);
+  configure_endpoint(&xhci_handle);
 
-        if (wait_for_command_completion_event(&xhci_handle,
-                CONFIGURE_ENDPOINT_CMD) != 0)
-        {
-            return;
-        }
+  if (wait_for_command_completion_event(&xhci_handle,
+          CONFIGURE_ENDPOINT_CMD) != 0)
+  {
+    return;
+  }
 }
 
-bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr,
-        uint8_t const setup_packet[ 8 ] )
+bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
 {
-    memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
+  memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
 
-    if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_CONFIGURATION)
-	{
-	  hcd_xhci_set_configuration();
-	  usb_set_config = 1;
-	}
+  if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_CONFIGURATION)
+  {
+    hcd_xhci_set_configuration();
+    usb_set_config = 1;
+  }
 
-    if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_ADDRESS)
-	{
-	  hcd_dwc3_update_device_address(ctrl_req.wValue);
-	}
-    hcd_event_xfer_complete(daddr, 0, 8, XFER_RESULT_SUCCESS, true);
+  if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_ADDRESS)
+  {
+    hcd_dwc3_update_device_address(ctrl_req.wValue);
+  }
+  hcd_event_xfer_complete(daddr, 0, 8, XFER_RESULT_SUCCESS, true);
 
-    return true;
+  return true;
 }
 
-bool hcd_dwc3_edpt_open( uint8_t rhport, uint8_t daddr,
-        tusb_desc_endpoint_t const *ep_desc )
+bool hcd_dwc3_edpt_open( uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t const *ep_desc )
 {
-    (void) rhport;
-    (void) daddr;
-    (void) ep_desc;
+  (void) rhport;
+  (void) daddr;
+  (void) ep_desc;
 
-    return true;
+  return true;
 }
 
 bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen)
 {
-    const uint8_t ep_num = tu_edpt_number(ep_addr);
-    const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
+  const uint8_t ep_num = tu_edpt_number(ep_addr);
+  const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
 
-    // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
-    if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
+  // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
+  if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
+  {
+    if( usb_set_config == 1 )
     {
-	  if( usb_set_config == 1 )
-	  {
-        usb_set_config = 0;
-	  }
-      hcd_event_xfer_complete(daddr, ep_num, 8, XFER_RESULT_SUCCESS, true);
-      return true;
+      usb_set_config = 0;
     }
-
-    if( ep_num == 0 )
-    {
-      configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t *)&ctrl_req);
-      ring_xhci_ep0_db(&xhci_handle.op_regs);
-	  if( buffer != NULL )
-	  {
-        socfpga_dcache_invalidate(buffer, buflen);
-      }
-    }
-    else
-    {
-      if( dir == TUSB_DIR_OUT )
-	  {
-        socfpga_dcache_clean(buffer, buflen);
-	  }
-      endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
-    }
-
+    hcd_event_xfer_complete(daddr, ep_num, 8, XFER_RESULT_SUCCESS, true);
     return true;
+  }
+
+  if( ep_num == 0 )
+  {
+    configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t *)&ctrl_req);
+    ring_xhci_ep0_db(&xhci_handle.op_regs);
+    if( buffer != NULL )
+    {
+      socfpga_dcache_invalidate(buffer, buflen);
+    }
+  }
+  else
+  {
+    if( dir == TUSB_DIR_OUT )
+    {
+      socfpga_dcache_clean(buffer, buflen);
+    }
+    endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
+  }
+
+  return true;
 }
 
 bool hcd_dwc3_edpt_abort_xfer( uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr )
 {
-    (void) rhport;
-    (void) dev_addr;
-    (void) ep_addr;
+  (void) rhport;
+  (void) dev_addr;
+  (void) ep_addr;
 
-    return false;
+  return false;
 }
 
 void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
 {
+  (void) rhport;
+  /*
+   * array to convert XHCI DCI to corresponding endpoint address for the
+   * tinyusb stack
+   */
+  const uint8_t DCI2EP[ 30 ] =
+  {
+      0x00, 0x01, 0x81, 0x02, 0x82, 0x3, 0x83,
+      0x04, 0x84, 0x05, 0x85, 0x06, 0x86
+  };
+  uint8_t ep_num;
+  int ep_dci;
 
-    (void) rhport;
-    /*
-     * array to convert XHCI DCI to corresponding endpoint address for the
-     * tinyusb stack
-     */
-    const uint8_t DCI2EP[ 30 ] =
-    {
-        0x00, 0x01, 0x81, 0x02, 0x82, 0x3, 0x83,
-        0x04, 0x84, 0x05, 0x85, 0x06, 0x86
-    };
-    uint8_t ep_num;
-    int ep_dci;
+  xhci_event_trb_type_t trb_id;
 
-    xhci_event_trb_type_t trb_id;
+  xpsc_event_t psc_event;
+  xtc_event_t tr_event;
+  xcc_event_t cc_event;
+  xhci_psceg_params_t rh_params;
 
-    xpsc_event_t psc_event;
-    xtc_event_t tr_event;
-    xcc_event_t cc_event;
-    xhci_psceg_params_t rh_params;
+  xhci_event_trb_t event_data;
 
-    xhci_event_trb_t event_data;
+  event_data = get_xhc_event(&xhci_handle);
 
-    event_data = get_xhc_event(&xhci_handle);
+  trb_id =
+          (xhci_event_trb_type_t) event_data.event_trb.trb_control_field.
+          trb_type;
 
-    trb_id =
-            (xhci_event_trb_type_t) event_data.event_trb.trb_control_field.
-            trb_type;
-
-    switch (trb_id)
-    {
+  switch (trb_id)
+  {
     case TRANSFER_EVENT:
-        tr_event = event_data.tr_event;
-        if (tr_event.tc_status_params.compl_code == (uint32_t)EVENT_SUCCESS)
-        {
-            uint32_t xfer_bytes = tr_event.tc_status_params.transfer_len;
-            ep_dci = (int) event_data.tr_event.tc_ctrl_params.ep_dci;
-            ep_num = DCI2EP[ ep_dci - 1 ];
-            hcd_event_xfer_complete(device_addr, ep_num, xfer_bytes, XFER_RESULT_SUCCESS,
-                    true);
-        }
-        break;
+      tr_event = event_data.tr_event;
+      if (tr_event.tc_status_params.compl_code == (uint32_t)EVENT_SUCCESS)
+      {
+          uint32_t xfer_bytes = tr_event.tc_status_params.transfer_len;
+          ep_dci = (int) event_data.tr_event.tc_ctrl_params.ep_dci;
+          ep_num = DCI2EP[ ep_dci - 1 ];
+          hcd_event_xfer_complete(device_addr, ep_num, xfer_bytes, XFER_RESULT_SUCCESS,
+                  true);
+      }
+      break;
 
     case PORT_STATUS_CHANGE_EVENT:
-        psc_event = event_data.psc_event;
-        rh_params = handle_psceg_event(psc_event);
+      psc_event = event_data.psc_event;
+      rh_params = handle_psceg_event(psc_event);
 
-        /* RH port id should be always less than maximum supported port */
-        if ((rh_params.rhport < 1U) || (rh_params.rhport >
-                xhci_handle.xhc_cap_ptr->hcsparams1_params.max_ports))
-        {
-            break;
-        }
-        if (rh_params.dev_attach_flag == 1)
-        {
-            hcd_event_device_attach(rh_params.rhport, in_isr);
-            update_device_rh_params(&xhci_handle, rh_params);
-        }
-        else if (rh_params.dev_attach_flag == -1)
-        {
-            hcd_event_device_remove(rh_params.rhport, in_isr);
-        }
-        else
-        {
-            /* Nothing to be handled for tinyusb stack */
-        }
-        break;
+      /* RH port id should be always less than maximum supported port */
+      if ((rh_params.rhport < 1U) || (rh_params.rhport >
+              xhci_handle.xhc_cap_ptr->hcsparams1_params.max_ports))
+      {
+          break;
+      }
+      if (rh_params.dev_attach_flag == 1)
+      {
+          hcd_event_device_attach(rh_params.rhport, in_isr);
+          update_device_rh_params(&xhci_handle, rh_params);
+      }
+      else if (rh_params.dev_attach_flag == -1)
+      {
+          hcd_event_device_remove(rh_params.rhport, in_isr);
+      }
+      else
+      {
+          /* Nothing to be handled for tinyusb stack */
+      }
+      break;
 
     case COMMAND_COMPLETION_EVENT:
-        cc_event = event_data.cc_event;
-        xhci_command_event_complete(cc_event);
-        break;
+      cc_event = event_data.cc_event;
+      xhci_command_event_complete(cc_event);
+      break;
 
     default: /* do nothing */
-        break;
-    }
+      break;
+  }
 
 }
 
 bool hcd_evaluate_xhci_context( void )
 {
-    tusb_desc_device_t usb_desc;
-    TU_ASSERT(tuh_descriptor_get_device_local(device_addr, &usb_desc));
-    const uint16_t bcd_usb = usb_desc.bcdUSB;
-    uint16_t desc_max_pkt_size;
-    const uint16_t ep0_pkt_size =
-            (xhci_handle.ip_ctx->xe_context[ 0 ].xec_info &
-            ~EP_CTX_MAX_PKT_SIZE_MSK) >> EP_CTX_MAX_PKT_SIZE_POS;
+  tusb_desc_device_t usb_desc;
+  TU_ASSERT(tuh_descriptor_get_device_local(device_addr, &usb_desc));
+  const uint16_t bcd_usb = usb_desc.bcdUSB;
+  uint16_t desc_max_pkt_size;
+  const uint16_t ep0_pkt_size =
+          (xhci_handle.ip_ctx->xe_context[ 0 ].xec_info &
+          ~EP_CTX_MAX_PKT_SIZE_MSK) >> EP_CTX_MAX_PKT_SIZE_POS;
 
-    if (bcd_usb >= 0x300U)
+  if (bcd_usb >= 0x300U)
+  {
+    desc_max_pkt_size = (uint16_t) pow(2, usb_desc.bMaxPacketSize0);
+  }
+  else
+  {
+    desc_max_pkt_size = usb_desc.bMaxPacketSize0;
+  }
+
+  if (ep0_pkt_size != desc_max_pkt_size)
+  {
+    update_endpoint_packetsize(xhci_handle.ip_ctx, desc_max_pkt_size);
+
+    evaluate_endpoint(&xhci_handle);
+
+    if (wait_for_command_completion_event(&xhci_handle, EVALUATE_CONTEXT_CMD) != 0)
     {
-        desc_max_pkt_size = (uint16_t) pow(2, usb_desc.bMaxPacketSize0);
-    }
-    else
-    {
-        desc_max_pkt_size = usb_desc.bMaxPacketSize0;
-    }
-
-    if (ep0_pkt_size != desc_max_pkt_size)
-    {
-        update_endpoint_packetsize(xhci_handle.ip_ctx, desc_max_pkt_size);
-
-        evaluate_endpoint(&xhci_handle);
-
-        if (wait_for_command_completion_event(&xhci_handle, EVALUATE_CONTEXT_CMD) != 0)
-        {
-            return false;
-        }
-
-        return true;
+      return false;
     }
 
     return true;
+  }
+
+  return true;
 }
 bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
 {
-    const uint8_t usb_speed = xhci_handle.dev_data.dev_speed;
+  const uint8_t usb_speed = xhci_handle.dev_data.dev_speed;
 
-    uint16_t const total_len = tu_le16toh(desc_cfg->wTotalLength);
-    uint8_t const *desc_end = ((uint8_t const*) desc_cfg) + total_len;
-    uint8_t const *p_desc = tu_desc_next(desc_cfg);
-    uint8_t assoc_itf_count = 1;
-    uint32_t err_flag = 0U;
+  uint16_t const total_len = tu_le16toh(desc_cfg->wTotalLength);
+  uint8_t const *desc_end = ((uint8_t const*) desc_cfg) + total_len;
+  uint8_t const *p_desc = tu_desc_next(desc_cfg);
+  uint8_t assoc_itf_count = 1;
+  uint32_t err_flag = 0U;
 
-    usb_endpoint_descriptor_t xhci_ep_desc;
+  usb_endpoint_descriptor_t xhci_ep_desc;
 
-    DEBUG("Parsing Complete Configuration Descriptors");
+  DEBUG("Parsing Complete Configuration Descriptors");
 
-    while (p_desc < desc_end)
+  while (p_desc < desc_end)
+  {
+    TU_ASSERT(TUSB_DESC_INTERFACE == tu_desc_type(p_desc));
+
+    tusb_desc_interface_t const *desc_itf =
+            (tusb_desc_interface_t const*) (uintptr_t) p_desc;
+
+    /* Check if the device belongs to MSC */
+    if (desc_itf->bInterfaceClass != 8)
     {
-        TU_ASSERT(TUSB_DESC_INTERFACE == tu_desc_type(p_desc));
+      PRINT("Device does not support MSC");
+      PRINT("Enumeration process completed");
+      return false;
+    }
 
-        tusb_desc_interface_t const *desc_itf =
-                (tusb_desc_interface_t const*) (uintptr_t) p_desc;
+    uint16_t const drv_len = tu_desc_get_interface_total_len(desc_itf,
+            assoc_itf_count, (uint16_t) (desc_end - p_desc));
 
-        /* Check if the device belongs to MSC */
-        if (desc_itf->bInterfaceClass != 8)
-        {
-            PRINT("Device does not support MSC");
-            PRINT("Enumeration process completed");
-            return false;
-        }
+    tusb_desc_endpoint_t const *ep_desc =
+            (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
+            desc_itf);
 
-        uint16_t const drv_len = tu_desc_get_interface_total_len(desc_itf,
-                assoc_itf_count, (uint16_t) (desc_end - p_desc));
+    for (int i = 0; i < 2; i++)
+    {
+      TU_ASSERT( TUSB_DESC_ENDPOINT == ep_desc->bDescriptorType &&
+              TUSB_XFER_BULK == ep_desc->bmAttributes.xfer);
 
-        tusb_desc_endpoint_t const *ep_desc =
+      xhci_ep_desc.bLength = ep_desc->bLength;
+      xhci_ep_desc.bDescriptorType = ep_desc->bDescriptorType;
+      xhci_ep_desc.bEndpointAddress = ep_desc->bEndpointAddress;
+      (void) memcpy(&xhci_ep_desc.bmAttributes, &ep_desc->bmAttributes,
+              sizeof(xhci_ep_desc.bmAttributes));
+      xhci_ep_desc.wMaxPacketSize = ep_desc->wMaxPacketSize;
+      xhci_ep_desc.bInterval = ep_desc->bInterval;
+
+      /* USB3.0 Mode */
+      if (usb_speed == XHCI_SPEED_SS)
+      {
+        ep_desc =
                 (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
-                desc_itf);
+                ep_desc);
 
-        for (int i = 0; i < 2; i++)
-        {
-            TU_ASSERT( TUSB_DESC_ENDPOINT == ep_desc->bDescriptorType &&
-                    TUSB_XFER_BULK == ep_desc->bmAttributes.xfer);
+        ep_desc =
+                (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
+                ep_desc);
+      }
+      else
+      {
+        ep_desc =
+                (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
+                ep_desc);
+      }
 
-            xhci_ep_desc.bLength = ep_desc->bLength;
-            xhci_ep_desc.bDescriptorType = ep_desc->bDescriptorType;
-            xhci_ep_desc.bEndpointAddress = ep_desc->bEndpointAddress;
-            (void) memcpy(&xhci_ep_desc.bmAttributes, &ep_desc->bmAttributes,
-                    sizeof(xhci_ep_desc.bmAttributes));
-            xhci_ep_desc.wMaxPacketSize = ep_desc->wMaxPacketSize;
-            xhci_ep_desc.bInterval = ep_desc->bInterval;
-
-            /* USB3.0 Mode */
-            if (usb_speed == XHCI_SPEED_SS)
-            {
-                ep_desc =
-                        (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
-                        ep_desc);
-
-                ep_desc =
-                        (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
-                        ep_desc);
-            }
-            else
-            {
-                ep_desc =
-                        (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(
-                        ep_desc);
-            }
-
-            if (xhci_parse_endpoint_descriptor(&xhci_handle, &xhci_ep_desc) != 0)
-            {
-                ERROR("Failed to parse endpoint descriptor");
-                return false;
-            }
-            err_flag = 1U;
-        }
-
-        p_desc += drv_len;
-    }
-
-    if (err_flag == 0U)
-    {
+      if (xhci_parse_endpoint_descriptor(&xhci_handle, &xhci_ep_desc) != 0)
+      {
+        ERROR("Failed to parse endpoint descriptor");
         return false;
+      }
+      err_flag = 1U;
     }
 
-    return true;
+    p_desc += drv_len;
+  }
+
+  if (err_flag == 0U)
+  {
+    return false;
+  }
+
+  return true;
 }
