@@ -331,14 +331,14 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
     ring_xhci_ep0_db(&xhci_handle.op_regs);
     if( buffer != NULL )
     {
-      socfpga_dcache_invalidate(buffer, buflen);
+      cache_force_invalidate(buffer, buflen);
     }
   }
   else
   {
     if( dir == TUSB_DIR_OUT )
     {
-      socfpga_dcache_clean(buffer, buflen);
+      cache_force_write_back(buffer, buflen);
     }
     endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
   }
