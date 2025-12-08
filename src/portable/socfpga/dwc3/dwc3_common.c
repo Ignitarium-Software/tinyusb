@@ -35,7 +35,7 @@ int init_hcd_params( void )
 
 int wait_for_command_completion_event( struct xhci_data *xhci_ptr, int type )
 {
-    xcc_event_t event;
+    xcc_event_t event = {0};
     while ( true )
     {
         if ( osal_queue_receive(xhci_queue, &event, UINT32_MAX) == pdTRUE )
