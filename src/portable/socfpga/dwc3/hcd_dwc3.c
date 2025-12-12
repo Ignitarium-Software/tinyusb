@@ -42,6 +42,15 @@
   #include "socfpga_cache.h"
 #endif
 
+typedef struct
+{
+  uint8_t *buffer;
+  uint32_t buflen;
+} hcd_dwc3_endpoint_t;
+
+#define XHCI_DCI_MAX 31
+hcd_dwc3_endpoint_t ep_data[XHCI_DCI_MAX];
+
 static void hcd_xhci_set_configuration();
 static void hcd_dwc3_update_device_address( uint8_t daddr );
 
@@ -313,6 +322,7 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
 {
   const uint8_t ep_num = tu_edpt_number(ep_addr);
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
+  const uint8_t ep_dci = get_ep_dci(ep_addr);
 
   // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
   if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
@@ -325,14 +335,13 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
     return true;
   }
 
+  ep_data[ep_dci].buffer = buffer;
+  ep_data[ep_dci].buflen = buflen;
+
   if( ep_num == 0 )
   {
     configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t *)&ctrl_req);
     ring_xhci_ep0_db(&xhci_handle.op_regs);
-    if( buffer != NULL )
-    {
-      cache_force_invalidate(buffer, buflen);
-    }
   }
   else
   {
@@ -353,6 +362,25 @@ bool hcd_dwc3_edpt_abort_xfer( uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr
   (void) ep_addr;
 
   return false;
+}
+
+static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr)
+{
+  uint8_t *buffer = ep_data[ep_dci].buffer;
+  uint32_t buflen = ep_data[ep_dci].buflen;
+  const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
+  const uint8_t ep_num = tu_edpt_number(ep_addr);
+
+  if(ep_num == 0 && buflen != 0)
+  {
+    cache_force_invalidate(buffer, buflen);
+  }
+
+  if( dir == TUSB_DIR_IN )
+  {
+    cache_force_invalidate(buffer, buflen);
+  }
+
 }
 
 void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
@@ -394,6 +422,7 @@ void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
           uint32_t xfer_bytes = tr_event.tc_status_params.transfer_len;
           ep_dci = (int) event_data.tr_event.tc_ctrl_params.ep_dci;
           ep_num = DCI2EP[ ep_dci - 1 ];
+          handle_endpoint_transfer(ep_dci, ep_num);
           hcd_event_xfer_complete(device_addr, ep_num, xfer_bytes, XFER_RESULT_SUCCESS,
                   true);
       }
