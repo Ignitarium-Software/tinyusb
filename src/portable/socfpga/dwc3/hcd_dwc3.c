@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2021 Koji Kitayama
  * Portions copyrighted (c) 2021 Roland Winistoerfer
+ * Copyright (C) 2025-2026 Altera Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
