@@ -49,7 +49,7 @@ typedef struct
 } hcd_dwc3_endpoint_t;
 
 #define XHCI_DCI_MAX 31
-hcd_dwc3_endpoint_t ep_data[XHCI_DCI_MAX];
+static hcd_dwc3_endpoint_t ep_data[XHCI_DCI_MAX];
 
 static void hcd_xhci_set_configuration();
 static void hcd_dwc3_update_device_address( uint8_t daddr );
@@ -58,7 +58,7 @@ struct xhci_data xhci_handle __attribute__((aligned(64)));
 static struct xhci_int_desc usb3_int_desc;
 static tusb_control_request_t ctrl_req;
 static int usb_set_config = 0;
-uint8_t device_addr = 0;
+static uint8_t device_addr = 0;
 
 bool hcd_dwc3_init( uint8_t rhport, const tusb_rhport_init_t *rh_init )
 {
@@ -292,6 +292,8 @@ static void hcd_xhci_set_configuration()
 
 bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
 {
+  TU_VERIFY(setup_packet != NULL);
+
   memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
 
   if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_CONFIGURATION)
@@ -324,6 +326,11 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_dci = get_ep_dci(ep_addr);
 
+  if (ep_dci >= XHCI_DCI_MAX)
+  {
+    return false;
+  }
+
   // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
   if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
   {
@@ -347,7 +354,10 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   {
     if( dir == TUSB_DIR_OUT )
     {
-      cache_force_write_back(buffer, buflen);
+      if ((buffer != NULL) && (buflen != 0U))
+      {
+        cache_force_write_back(buffer, buflen);
+      }
     }
     endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
   }
@@ -371,7 +381,12 @@ static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr)
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_num = tu_edpt_number(ep_addr);
 
-  if(ep_num == 0 && buflen != 0)
+  if ((buffer == NULL) || (buflen == 0U))
+  {
+    return;
+  }
+
+  if(ep_num == 0 && buflen != 0U)
   {
     cache_force_invalidate(buffer, buflen);
   }
@@ -421,8 +436,15 @@ void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
       {
           uint32_t xfer_bytes = tr_event.tc_status_params.transfer_len;
           ep_dci = (int) event_data.tr_event.tc_ctrl_params.ep_dci;
+
+          if ((ep_dci <= 0) || ((uint32_t)(ep_dci - 1) >= TU_ARRAY_SIZE(DCI2EP)) ||
+                ((uint32_t)ep_dci >= (uint32_t) XHCI_DCI_MAX))
+          {
+            break;
+          }
+
           ep_num = DCI2EP[ ep_dci - 1 ];
-          handle_endpoint_transfer(ep_dci, ep_num);
+          handle_endpoint_transfer((uint8_t)ep_dci, ep_num);
           hcd_event_xfer_complete(device_addr, ep_num, xfer_bytes, XFER_RESULT_SUCCESS,
                   true);
       }
@@ -433,7 +455,7 @@ void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
       rh_params = handle_psceg_event(psc_event);
 
       /* RH port id should be always less than maximum supported port */
-      if ((rh_params.rhport < 1U) || (rh_params.rhport >
+      if ((xhci_handle.xhc_cap_ptr == NULL) || (rh_params.rhport < 1U) || (rh_params.rhport >
               xhci_handle.xhc_cap_ptr->hcsparams1_params.max_ports))
       {
           break;

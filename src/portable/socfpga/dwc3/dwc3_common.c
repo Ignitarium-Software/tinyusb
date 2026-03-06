@@ -36,6 +36,12 @@ int init_hcd_params( void )
 int wait_for_command_completion_event( struct xhci_data *xhci_ptr, int type )
 {
     xcc_event_t event = {0};
+
+    if ((xhci_queue == NULL) || (xhci_ptr == NULL) || (xhci_ptr->xcr_ring == NULL))
+    {
+        return -ENODEV;
+    }
+
     while ( true )
     {
         if ( osal_queue_receive(xhci_queue, &event, UINT32_MAX) == pdTRUE )
@@ -72,7 +78,16 @@ int wait_for_command_completion_event( struct xhci_data *xhci_ptr, int type )
 
 void xhci_command_event_complete( xcc_event_t event )
 {
-    (void) osal_queue_send(xhci_queue, &event);
+    if (xhci_queue == NULL)
+    {
+        ERROR("xHCI event queue not initialized");
+        return;
+    }
+
+    if (osal_queue_send(xhci_queue, &event) != pdTRUE)
+    {
+        ERROR("Failed to enqueue xHCI command completion event");
+    }
 }
 
 void reset_usb_port( uint8_t rhport )
