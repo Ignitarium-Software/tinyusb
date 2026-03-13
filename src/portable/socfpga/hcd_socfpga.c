@@ -2,6 +2,7 @@
  * The MIT License (MIT)
  *
  * Copyright (c) 2024 Ha Thach (tinyusb.org)
+ * Copyright (C) 2025-2026 Altera Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +25,22 @@
  * This file is part of the TinyUSB stack.
  */
 
+#include "gen_config.h"
+
+#if (CONFIG_USB3_ISENABLE == 0) && (CONFIG_USB_OTG_ISENABLE == 0)
+  #error "Either usb3 or usb_otg driver should be enabled"
+#endif
+
 #include "tusb_option.h"
-#include "hcd_dwc2.h"
-#include "hcd_dwc3.h"
+
+#if (CONFIG_USB_OTG_ISENABLE == 1)
+  #include "hcd_dwc2.h"
+#endif
+
+#if (CONFIG_USB3_ISENABLE == 1)
+  #include "hcd_dwc3.h"
+#endif
+
 
 //--------------------------------------------------------------------+
 // Controller API
@@ -48,13 +62,17 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   bool ret;
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
     //USB2.0 dwc2 controller initialization
 	return hcd_dwc2_init(rhport, rh_init);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
     //USB3.1 controller initialization
 	ret = hcd_dwc3_init(rhport, rh_init);
+#endif
 
   }
 
@@ -65,11 +83,15 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 void hcd_int_enable (uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_int_enable(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	hcd_dwc3_int_enable(rhport);
+#endif
   }
 }
 
@@ -77,11 +99,15 @@ void hcd_int_enable (uint8_t rhport) {
 void hcd_int_disable(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_int_disable(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
     hcd_dwc3_int_disable(rhport);
+#endif
   }
 }
 
@@ -89,7 +115,9 @@ void hcd_int_disable(uint8_t rhport) {
 uint32_t hcd_frame_number(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_frame_number(rhport);
+#endif
   }
   else
   {
@@ -105,11 +133,15 @@ uint32_t hcd_frame_number(uint8_t rhport) {
 bool hcd_port_connect_status(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_port_connect_status(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	return hcd_dwc3_port_connect_status(rhport);
+#endif
   }
 
   return true;
@@ -120,11 +152,15 @@ bool hcd_port_connect_status(uint8_t rhport) {
 void hcd_port_reset(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_port_reset(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	hcd_dwc3_port_reset(rhport);
+#endif
   }
 }
 
@@ -132,11 +168,15 @@ void hcd_port_reset(uint8_t rhport) {
 void hcd_port_reset_end(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_port_reset_end(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	hcd_dwc3_port_reset_end(rhport);
+#endif
   }
 }
 
@@ -144,11 +184,15 @@ void hcd_port_reset_end(uint8_t rhport) {
 tusb_speed_t hcd_port_speed_get(uint8_t rhport) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_port_speed_get(rhport);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	return hcd_dwc3_port_speed_get(rhport);
+#endif
   }
   return 0;
 }
@@ -157,10 +201,15 @@ tusb_speed_t hcd_port_speed_get(uint8_t rhport) {
 void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_device_close(rhport, dev_addr);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
+	  hcd_dwc3_device_close(rhport);
+#endif
   }
 }
 
@@ -172,7 +221,9 @@ void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
 bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, const tusb_desc_endpoint_t* desc_ep) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_edpt_open(rhport, dev_addr, desc_ep);
+#endif
   }
   else
   {
@@ -192,11 +243,15 @@ bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr) {
 bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_edpt_xfer(rhport, dev_addr, ep_addr, buffer, buflen);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	return hcd_dwc3_edpt_xfer(rhport, dev_addr, ep_addr, buffer, buflen);
+#endif
   }
   return true;
 }
@@ -206,7 +261,9 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * 
 bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_edpt_abort_xfer(rhport, dev_addr, ep_addr);
+#endif
   }
   else
   {
@@ -218,11 +275,15 @@ bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
 bool hcd_setup_send(uint8_t rhport, uint8_t dev_addr, const uint8_t setup_packet[8]) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_setup_send(rhport, dev_addr, setup_packet);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
 	return hcd_dwc3_setup_send(rhport, dev_addr, setup_packet);
+#endif
   }
   return true;
 }
@@ -232,7 +293,9 @@ bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
   (void) rhport;
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	return hcd_dwc2_edpt_clear_stall(rhport, dev_addr, ep_addr);
+#endif
   }
   else
   {
@@ -249,7 +312,9 @@ bool hcd_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg, uint8_
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
     return hcd_dwc3_parse_full_conf_descriptor(desc_cfg);
+#endif
   }
   
   return true;
@@ -258,11 +323,15 @@ bool hcd_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg, uint8_
 void hcd_int_handler(uint8_t rhport, bool in_isr) {
   if( rhport == SOCFPGA_USB2_OTG_PORT )
   {
+#if (CONFIG_USB_OTG_ISENABLE == 1)
 	hcd_dwc2_int_handler(rhport, in_isr);
+#endif
   }
   else
   {
+#if (CONFIG_USB3_ISENABLE == 1)
     hcd_dwc3_int_handler(rhport, in_isr);
+#endif
   }
 
 }

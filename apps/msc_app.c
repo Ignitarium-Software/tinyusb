@@ -27,7 +27,7 @@
 #include "tusb.h"
 #include "osal_log.h"
 #include "socfpga_cache.h"
-#include "hcd_dwc3.h"
+#include "host/hcd.h"
 
 #define MSC_BLOCK_SIZE (512)
 
@@ -97,7 +97,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
     tuh_bus_info_get(dev_addr, &dev_info);
     if( dev_info.rhport != SOCFPGA_USB2_OTG_PORT )
     {
-        hcd_dwc3_device_close(dev_info.rhport);
+        hcd_device_close(dev_info.rhport, dev_addr);
     }
     PRINT("A MassStorage device is unmounted, address - %d\r\n", dev_addr);
 }
