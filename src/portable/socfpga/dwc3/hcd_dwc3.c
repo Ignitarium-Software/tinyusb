@@ -108,6 +108,9 @@ bool hcd_dwc3_init( uint8_t rhport, const tusb_rhport_init_t *rh_init )
 }
 bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
 {
+  (void)rhport;
+  (void)daddr;
+  (void)ep_addr;
   return true;
 }
 
@@ -292,6 +295,7 @@ static void hcd_xhci_set_configuration()
 
 bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
 {
+  (void)rhport;
   memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
 
   if ((tusb_request_code_t) setup_packet[ 1 ] == TUSB_REQ_SET_CONFIGURATION)
@@ -324,6 +328,7 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_dci = get_ep_dci(ep_addr);
 
+  (void)rhport;
   // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
   if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
   {
