@@ -38,7 +38,7 @@ int wait_for_command_completion_event( struct xhci_data *xhci_ptr, int type )
 {
     xcc_event_t event = {0};
 
-    if ((xhci_queue == NULL) || (xhci_ptr == NULL) || (xhci_ptr->xcr_ring == NULL))
+    if ((xhci_queue == NULL) || (xhci_ptr == NULL))
     {
         return -ENODEV;
     }
@@ -72,7 +72,7 @@ int wait_for_command_completion_event( struct xhci_data *xhci_ptr, int type )
         break;
     }
 
-    xhci_ptr->xcr_ring->xcr_dequeue_ptr = (xhci_trb_t*) (event.cmd_trb_ptr);
+    xhci_ptr->xcr_ring.xcr_dequeue_ptr = (xhci_trb_t*) (event.cmd_trb_ptr);
 
     return 0;
 }

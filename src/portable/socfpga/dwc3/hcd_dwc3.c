@@ -109,6 +109,9 @@ bool hcd_dwc3_init( uint8_t rhport, const tusb_rhport_init_t *rh_init )
 }
 bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
 {
+  (void)rhport;
+  (void)daddr;
+  (void)ep_addr;
   return true;
 }
 
@@ -151,7 +154,7 @@ void hcd_dwc3_port_reset( uint8_t rhport )
 
 static bool hcd_enable_slot( void )
 {
-  enable_slot_command(xhci_handle.xcr_ring);
+  enable_slot_command(&xhci_handle.xcr_ring);
 
   if (wait_for_command_completion_event(&xhci_handle,
           ENABLE_SLOT_CMD) != 0)
@@ -256,7 +259,7 @@ void hcd_dwc3_device_close( uint8_t rhport )
 
   if (slotid != 0U)
   {
-    disable_slot_command(xhci_handle.xcr_ring, slotid);
+    disable_slot_command(&xhci_handle.xcr_ring, slotid);
 
     if (wait_for_command_completion_event(&xhci_handle,
             DISABLE_SLOT_CMD) != 0)
@@ -293,6 +296,7 @@ static void hcd_xhci_set_configuration()
 
 bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
 {
+  (void)rhport;
   TU_VERIFY(setup_packet != NULL);
 
   memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
@@ -327,11 +331,7 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_dci = get_ep_dci(ep_addr);
 
-  if (ep_dci >= XHCI_DCI_MAX)
-  {
-    return false;
-  }
-
+  (void)rhport;
   // There is no separate data stage for xHCI controller. Hence skip the tinyusb enumeration step for data stage
   if( buffer == NULL && (buflen == 0) && (usb_set_config == 0))
   {
