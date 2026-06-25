@@ -73,14 +73,14 @@ TU_ATTR_ALWAYS_INLINE static inline void dwc2_int_set(uint8_t rhport, tusb_role_
   socfpga_interrupt_err_t intr_ret;
 
   intr_ret = interrupt_register_isr(USB0IRQ, dwc2_int_handler_wrap, NULL);
-  if (intr_ret != ERR_OK)
+  if (intr_ret != 0)
   {
       ERROR("Failed to enable interrupt");
       return;
   }
 
   intr_ret = interrupt_enable(USB0IRQ, GIC_INTERRUPT_PRIORITY_USB2);
-  if (intr_ret != ERR_OK)
+  if (intr_ret != 0)
   {
       ERROR("Failed to enable interrupt");
       return;
