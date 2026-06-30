@@ -70,7 +70,7 @@ TU_ATTR_ALWAYS_INLINE static inline void dwc2_int_set(uint8_t rhport, tusb_role_
   (void) role;
   (void) rhport;
   (void) enabled;
-  socfpga_interrupt_err_t intr_ret;
+  int intr_ret;
 
   intr_ret = interrupt_register_isr(USB0IRQ, dwc2_int_handler_wrap, NULL);
   if (intr_ret != 0)
