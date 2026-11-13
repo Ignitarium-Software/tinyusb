@@ -21,9 +21,12 @@ target_compile_definitions(agilex5-tinyusb PUBLIC CFG_TUSB_MCU=OPT_MCU_SOCFPGA C
 target_include_directories(agilex5-tinyusb PUBLIC
   ${FREERTOS_TOP_DIR}/drivers/usb_otg
   ${FREERTOS_TOP_DIR}/tinyusb/src/class/msc
+  ${FREERTOS_TOP_DIR}/tinyusb/src/common
   ${FREERTOS_TOP_DIR}/tinyusb/apps/
   ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc2/
   ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/
+  ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/
+  ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci
   )
 
 # Add TinyUSB target and port source
@@ -39,5 +42,17 @@ target_include_directories(agilex5-tinyusb PUBLIC
     # Synopsys dwc3 controller
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/hcd_dwc3.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/dwc3_common.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/dwc3.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/dwc3_ll.c
+
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_cap.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_commands.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_context.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_doorbell.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_endpoints.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_events.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_interrupts.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_rings.c
     )
 target_link_libraries(agilex5-tinyusb PRIVATE socfpga_drivers m)
