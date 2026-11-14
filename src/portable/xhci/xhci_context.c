@@ -44,30 +44,28 @@
  */
 
 #include "xhci.h"
-#include "socfpga_cache.h"
-#include "socfpga_defines.h"
+#include "xhci_port.h"
 #include "xhci_endpoints.h"
 #include "xhci_context.h"
 #include "xhci_events.h"
-#include "osal_log.h"
 
 int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
 {
     int ret = 0;
-    xhci_ptr->xcr_ring = alloc_command_ring();
+    xhci_ptr->xcr_ring = xhci_alloc_command_ring();
     if (xhci_ptr->xcr_ring == NULL)
     {
         ERROR("Cannot allocate memory!!!");
         ret = -ENOMEM;
     }
 
-    if (alloc_input_device_context(xhci_ptr) != 0)
+    if (xhci_alloc_input_device_context(xhci_ptr) != 0)
     {
         ERROR("Cannot allocate memory!!!");
         ret = -ENOMEM;
     }
 
-    if (alloc_output_device_context(xhci_ptr) != 0)
+    if (xhci_alloc_output_device_context(xhci_ptr) != 0)
     {
         ERROR("Cannot allocate memory!!!");
         ret = -ENOMEM;
@@ -77,15 +75,15 @@ int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
     {
         if (xhci_ptr->xcr_ring != NULL)
         {
-            vPortFree((void *)xhci_ptr->xcr_ring);
+            XHCI_MEM_FREE((void *)xhci_ptr->xcr_ring);
         }
         if (xhci_ptr->ip_ctx != NULL)
         {
-            vPortFree((void *)xhci_ptr->ip_ctx);
+            XHCI_MEM_FREE((void *)xhci_ptr->ip_ctx);
         }
         if (xhci_ptr->op_ctx != NULL)
         {
-            vPortFree((void *)xhci_ptr->op_ctx);
+            XHCI_MEM_FREE((void *)xhci_ptr->op_ctx);
         }
     }
     INFO("xHCI contexts allocated successfully");
@@ -102,17 +100,17 @@ void deallocate_xhci_context(struct xhci_data *xhci_ptr)
     /* free bulk endpoint tr rings */
     if (xhci_ptr->msc_eps.ep_out.ep_tr_enq_ptr != NULL)
     {
-        vPortFree((void *)(uintptr_t)(xhci_ptr->msc_eps.ep_out.ep_tr_enq_ptr));
+        XHCI_MEM_FREE((void *)(uintptr_t)(xhci_ptr->msc_eps.ep_out.ep_tr_enq_ptr));
     }
     if (xhci_ptr->msc_eps.ep_in.ep_tr_enq_ptr != NULL)
     {
-        vPortFree((void *)(uintptr_t)(xhci_ptr->msc_eps.ep_in.ep_tr_enq_ptr));
+        XHCI_MEM_FREE((void *)(uintptr_t)(xhci_ptr->msc_eps.ep_in.ep_tr_enq_ptr));
     }
 
     /* Free Control EP TR ring */
     if (xhci_ptr->ep0.ep_tr_enq_ptr != NULL)
     {
-        vPortFree((void *)(uintptr_t)(xhci_ptr->ep0.ep_tr_enq_ptr));
+        XHCI_MEM_FREE((void *)(uintptr_t)(xhci_ptr->ep0.ep_tr_enq_ptr));
     }
 
     /* clear input and output context data structures */
@@ -132,7 +130,7 @@ int init_xhci_context_params(struct xhci_data *xhci_ptr)
     xhci_ptr->dev_data.dev_speed = 0U;
     xhci_ptr->dev_data.rh_port = 0U;
 
-    if (alloc_dcbaa(xhci_ptr) != 0)
+    if (xhci_alloc_dcbaa(xhci_ptr) != 0)
     {
         return -ENOMEM;
     }
@@ -142,7 +140,7 @@ int init_xhci_context_params(struct xhci_data *xhci_ptr)
         return -ENOMEM;
     }
 
-    if (init_xhc_event_ring(xhci_ptr) != 0)
+    if (xhci_init_event_ring(xhci_ptr) != 0)
     {
         return -ENOMEM;
     }
@@ -153,9 +151,9 @@ int init_xhci_context_params(struct xhci_data *xhci_ptr)
 /**
  * @brief function to allocate memory for input context and initialize them to 0
  */
-int alloc_input_device_context(struct xhci_data *xhci_ptr)
+int xhci_alloc_input_device_context(struct xhci_data *xhci_ptr)
 {
-    xhci_ptr->ip_ctx = (xhci_ip_device_context_t *)pvPortMallocCoherent(
+    xhci_ptr->ip_ctx = (xhci_ip_device_context_t *)XHCI_MEM_ALLOC_COHERENT(
             sizeof(xhci_ip_device_context_t));
     if (xhci_ptr->ip_ctx == NULL)
     {
@@ -167,7 +165,7 @@ int alloc_input_device_context(struct xhci_data *xhci_ptr)
     return 0;
 }
 
-int init_input_device_context(struct xhci_data *xhci_ptr)
+int xhci_init_input_device_context(struct xhci_data *xhci_ptr)
 {
     xhci_ip_device_context_t *input_ctx = xhci_ptr->ip_ctx;
 
@@ -229,7 +227,7 @@ int init_input_device_context(struct xhci_data *xhci_ptr)
     /* Update the slot context fields */
 
     /*get the context entry field for the control endpoint */
-    context_entries = get_ep_dci(0U);
+    context_entries = xhci_get_ep_dci(0U);
 
     input_ctx->xs_context.xsc_info1 = ((uint64_t)dev_speed << 20);
     input_ctx->xs_context.xsc_info1 |= ((uint64_t)context_entries << 27);
@@ -244,7 +242,7 @@ int init_input_device_context(struct xhci_data *xhci_ptr)
      * DCS -> 1
      * Avg. TRB Length -> 8
      */
-    xep0_tr_ptr = allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
+    xep0_tr_ptr = xhci_allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
             EP_TRB_SEG_LENGTH);
     if (xep0_tr_ptr == NULL)
     {
@@ -271,9 +269,9 @@ int init_input_device_context(struct xhci_data *xhci_ptr)
     return 0;
 }
 
-int alloc_output_device_context(struct xhci_data *xhci_ptr)
+int xhci_alloc_output_device_context(struct xhci_data *xhci_ptr)
 {
-    xhci_ptr->op_ctx = (xhci_op_device_context_t *)pvPortMallocCoherent(
+    xhci_ptr->op_ctx = (xhci_op_device_context_t *)XHCI_MEM_ALLOC_COHERENT(
             sizeof(xhci_op_device_context_t));
     if (xhci_ptr->op_ctx == NULL)
     {
@@ -286,7 +284,7 @@ int alloc_output_device_context(struct xhci_data *xhci_ptr)
     return 0;
 }
 
-void init_xhc_endpoint_context(struct xhci_data *xhci, xhci_ep_type_t ep_type)
+void xhci_init_endpoint_context(struct xhci_data *xhci, xhci_ep_type_t ep_type)
 {
     usb_endpoint_descriptor_t *ep_desc;
     xhci_trb_t *tr_ptr;
@@ -327,9 +325,9 @@ void init_xhc_endpoint_context(struct xhci_data *xhci, xhci_ep_type_t ep_type)
     xhci->ip_ctx->xe_context[ep_index].xec_info |= ((uint64_t)3U << 33);
 }
 
-int alloc_dcbaa(struct xhci_data *xhci_ptr)
+int xhci_alloc_dcbaa(struct xhci_data *xhci_ptr)
 {
-    xhci_ptr->dcbaa = (struct xhci_device_context_array *)pvPortMallocCoherent(
+    xhci_ptr->dcbaa = (struct xhci_device_context_array *)XHCI_MEM_ALLOC_COHERENT(
             sizeof(struct xhci_device_context_array));
     if (xhci_ptr->dcbaa == NULL)
     {
@@ -340,22 +338,22 @@ int alloc_dcbaa(struct xhci_data *xhci_ptr)
         xhci_ptr->dcbaa->dev_context_ptrs[i] = 0UL;
     }
 
-    WR_REG64((USBBASE + USB3_DCBAAP_LO), (uint64_t)xhci_ptr->dcbaa);
+    WR_REG64((XHCI_BASE_ADDR + USB3_DCBAAP_LO), (uint64_t)xhci_ptr->dcbaa);
     DEBUG("xHCI DCBAA register updated");
 
     return 0;
 }
 
-void update_dcbaa_entry(struct xhci_data *xhci_ptr)
+void xhci_update_dcbaa_entry(struct xhci_data *xhci_ptr)
 {
     const uint32_t slotid = xhci_ptr->dev_data.slot_id;
     xhci_ptr->dcbaa->dev_context_ptrs[slotid] = (uint64_t)xhci_ptr->op_ctx;
 }
 
-void update_xhc_slot_context(struct xhci_data *xhci_ptr)
+void xhci_update_slot_context(struct xhci_data *xhci_ptr)
 {
-    const uint8_t dci_bulk_in = get_ep_dci(xhci_ptr->msc_eps.ep_in.ep_addr);
-    const uint8_t dci_bulk_out = get_ep_dci(xhci_ptr->msc_eps.ep_out.ep_addr);
+    const uint8_t dci_bulk_in = xhci_get_ep_dci(xhci_ptr->msc_eps.ep_in.ep_addr);
+    const uint8_t dci_bulk_out = xhci_get_ep_dci(xhci_ptr->msc_eps.ep_out.ep_addr);
     const uint8_t context_entry_val = (dci_bulk_in > dci_bulk_out)
             ? dci_bulk_in : dci_bulk_out;
     uint64_t add_flags = 0UL;
@@ -385,29 +383,29 @@ void display_xhci_device_params(struct xhci_device_data *dev_data)
     (void)dev_speed;
 }
 
-void update_device_dev_speed(struct xhci_data *xhci_ptr)
+void xhci_update_device_dev_speed(struct xhci_data *xhci_ptr)
 {
-    xhci_ptr->dev_data.dev_speed = get_xhc_port_speed(
+    xhci_ptr->dev_data.dev_speed = xhci_get_port_speed(
             xhci_ptr->dev_data.rh_port);
 }
 
-void update_device_slot_id(struct xhci_device_data *dev_data, uint8_t slot_id)
+void xhci_update_device_slot_id(struct xhci_device_data *dev_data, uint8_t slot_id)
 {
     dev_data->slot_id = slot_id;
 }
 
-void update_device_rh_params(struct xhci_data *xhci_ptr,
+void xhci_update_device_rh_params(struct xhci_data *xhci_ptr,
         xhci_psceg_params_t rh_params)
 {
     xhci_ptr->dev_data.rh_port = (uint8_t) rh_params.rhport;
 }
 
-void update_device_address(struct xhci_data *xhci_ptr)
+void xhci_update_device_address(struct xhci_data *xhci_ptr)
 {
-    xhci_ptr->dev_data.dev_addr = get_xhc_device_address(xhci_ptr);
+    xhci_ptr->dev_data.dev_addr = xhci_get_device_address(xhci_ptr);
 }
 
-uint8_t get_xhc_device_address(struct xhci_data *xhci_ptr)
+uint8_t xhci_get_device_address(struct xhci_data *xhci_ptr)
 {
     uint8_t daddr = 0;
 
@@ -417,7 +415,7 @@ uint8_t get_xhc_device_address(struct xhci_data *xhci_ptr)
     return daddr;
 }
 
-void update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
+void xhci_update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
         uint16_t max_pkt_size)
 {
     ip_ctx->xe_context[0].xec_info &= EP_CTX_MAX_PKT_SIZE_MSK;
@@ -425,7 +423,7 @@ void update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
             EP_CTX_MAX_PKT_SIZE_POS);
 }
 
-void display_ip_context(xhci_ip_device_context_t *ip_ctx)
+void xhci_display_ip_context(xhci_ip_device_context_t *ip_ctx)
 {
     DEBUG(" Input control Contexts ");
     DEBUG(" Field 1 : %lx", ip_ctx->xi_context.xic_context_flags);
@@ -442,7 +440,7 @@ void display_ip_context(xhci_ip_device_context_t *ip_ctx)
     (void)ip_ctx;
 }
 
-void display_op_context(xhci_op_device_context_t *op_ctx)
+void xhci_display_op_context(xhci_op_device_context_t *op_ctx)
 {
     DEBUG(" Slot Contexts ");
     DEBUG(" Field 1 : %lx", op_ctx->slot_context.xsc_info1);

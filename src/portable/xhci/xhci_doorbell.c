@@ -8,7 +8,7 @@
  */
 
 #include "xhci_doorbell.h"
-#include "socfpga_defines.h"
+#include "xhci_port.h"
 
 void ring_xhci_host_db(void)
 {

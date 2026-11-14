@@ -7,11 +7,9 @@
  */
 
 #include "xhci.h"
-#include "socfpga_defines.h"
-#include "osal.h"
-#include "osal_log.h"
+#include "xhci_port.h"
 
-int is_ptr_mem_aligned(uint64_t addr, uint32_t byte)
+int xhci_is_ptr_mem_aligned(uint64_t addr, uint32_t byte)
 {
     uint64_t fact = 0UL;
 
@@ -62,17 +60,17 @@ static int configure_xhci_max_slots(void)
     uint32_t hcsparams1;
     uint32_t max_slots;
 
-    hcsparams1 = RD_REG32((USBBASE + USB3_HCSPARAMS1));
+    hcsparams1 = RD_REG32((XHCI_BASE_ADDR + USB3_HCSPARAMS1));
     max_slots = (hcsparams1 & USB3_HCSPARAMS1_MAXSLOTS_MASK)
             >> USB3_HCSPARAMS1_MAXSLOTS_POS;
 
     DEBUG("MaxSlots is : %x", max_slots);
 
-    config_reg_val = RD_REG32((USBBASE + USB3_CONFIG));
+    config_reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_CONFIG));
     max_slots |= (config_reg_val & (~USB3_CONFIG_MAXSLOTSEN_MASK));
-    WR_REG32((USBBASE + USB3_CONFIG), max_slots);
+    WR_REG32((XHCI_BASE_ADDR + USB3_CONFIG), max_slots);
 
-    config_reg_val = RD_REG32((USBBASE + USB3_CONFIG));
+    config_reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_CONFIG));
     if ((config_reg_val & USB3_CONFIG_MAXSLOTSEN_MASK) == 0U)
     {
         ERROR("Max Slot Enable Bit Not configurred Correctly");
@@ -85,9 +83,9 @@ void start_xhci_controller(void)
 {
     uint32_t reg_val;
 
-    reg_val = RD_REG32((USBBASE + USB3_USBCMD));
+    reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_USBCMD));
     reg_val |= (START_XHCI << USB3_USBCMD_R_S_POS);
-    WR_REG32((USBBASE + USB3_USBCMD), reg_val);
+    WR_REG32((XHCI_BASE_ADDR + USB3_USBCMD), reg_val);
 }
 
 /*
@@ -100,7 +98,7 @@ static int wait_for_controller_ready(void)
 
     do
     {
-        reg_val = RD_REG32((USBBASE + USB3_USBSTS));
+        reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_USBSTS));
         /* check for CNR flag */
         if ((reg_val & USB3_USBSTS_CNR_MASK) == 0U)
         {
@@ -125,15 +123,15 @@ int xhci_reset(void)
 {
     volatile uint32_t reg_val, err_flag = 0U, loop = 1000U;
 
-    reg_val = RD_REG32((USBBASE + USB3_USBCMD));
+    reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_USBCMD));
     /* Reset the Host Controller */
     reg_val |= (USB3_USBCMD_HCRST_MASK);
-    WR_REG32((USBBASE + USB3_USBCMD), reg_val);
+    WR_REG32((XHCI_BASE_ADDR + USB3_USBCMD), reg_val);
 
     INFO("Initiating Controller Reset");
     do
     {
-        reg_val = RD_REG32((USBBASE + USB3_USBCMD));
+        reg_val = RD_REG32((XHCI_BASE_ADDR + USB3_USBCMD));
         if ((reg_val & USB3_USBCMD_HCRST_MASK) == 0U)
         {
             err_flag = 1U;
@@ -158,7 +156,7 @@ bool xhci_init(struct xhci_data *xhci)
 {
     int ret;
 
-    get_xhc_cap_params(xhci);
+    xhci_get_cap_params(xhci);
 
     if(wait_for_controller_ready() != 0)
     {
@@ -181,4 +179,11 @@ bool xhci_init(struct xhci_data *xhci)
     start_xhci_controller();
 
     return true;
+}
+
+uint32_t xhci_get_mfindex(void)
+{
+    /* MFINDEX is the first register of the runtime register space (xHCI spec 5.5.1) */
+    xhci_oper_reg_params_t op_regs = get_xhci_op_registers();
+    return RD_REG32(op_regs.xhci_runtime_base) & 0x3FFFU;
 }

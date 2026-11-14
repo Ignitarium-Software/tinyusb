@@ -9,8 +9,7 @@
 #ifndef __XCHI_CONTEXT_H__
 #define __XCHI_CONTEXT_H__
 
-#include "socfpga_usb3_reg.h"
-#include "socfpga_defines.h"
+#include "xhci_port.h"
 
 /* MASK and POS for Input control context */
 #define DCI_SLOT_CONTEXT            (1UL) /* !< Select slot context in Input control context */
@@ -100,26 +99,26 @@ struct xhci_device_context_array {
 };
 
 /*
- * @func  : update_endpoint_packetsize
+ * @func  : xhci_update_endpoint_packetsize
  * @brief : update the endpoint context with max packet size
  * @param[in] ip_ctx reference to input context data structure
  * @param[in] max_pkt_size max packet size
  */
-void update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
+void xhci_update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
         uint16_t max_pkt_size);
 
 /*
- * @func  : display_op_context
+ * @func  : xhci_display_op_context
  * @brief : Display the output context data structure
  * @param[in] op_ctx reference to output context data structure
  */
-void display_op_context(xhci_op_device_context_t *op_ctx);
+void xhci_display_op_context(xhci_op_device_context_t *op_ctx);
 
 /*
- * @func  : display_ip_context
+ * @func  : xhci_display_ip_context
  * @brief : Display the input context data structure
  * @param[in] ip_ctx reference to input context data structure
  */
-void display_ip_context(xhci_ip_device_context_t *ip_ctx);
+void xhci_display_ip_context(xhci_ip_device_context_t *ip_ctx);
 
 #endif  /* __XCHI_CONTEXT_H__ */

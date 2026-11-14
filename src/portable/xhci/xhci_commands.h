@@ -65,63 +65,82 @@ typedef enum
 }xhci_command_status_t;
 
 /*
- * @func  : reset_command_ring
+ * @func  : xhci_reset_command_ring
  * @brief : reset the command ring
  * @param[in] xhci reference to command ring structure
  */
-void reset_command_ring(xcr_command_ring_t *xcr_ring);
+void xhci_reset_command_ring(xcr_command_ring_t *xcr_ring);
 
 /*
- * @func  : set_device_address
+ * @func  : xhci_set_device_address
  * @brief : send the USB set address command to device
  * @param[in] xhci reference to xhci structure
  */
-void set_device_address(struct xhci_data *xhci_ptr);
+void xhci_set_device_address(struct xhci_data *xhci_ptr);
 
 /*
- * @func  : enable_slot_command
+ * @func  : xhci_enable_slot_command
  * @brief : send the USB enable slot command
  * @param[in] xhci reference to xhci command ring structure
  */
-void enable_slot_command(xcr_command_ring_t *xcr_ring);
+void xhci_enable_slot_command(xcr_command_ring_t *xcr_ring);
 
 /*
- * @func  : disable_slot_command
+ * @func  : xhci_disable_slot_command
  * @brief : send the USB disable slot command
  * @param[in] xhci reference to xhci command structure
  * @param[in] xhci slot id to be disabled
  */
-void disable_slot_command(xcr_command_ring_t *xcr_ring, uint32_t slotid);
+void xhci_disable_slot_command(xcr_command_ring_t *xcr_ring, uint32_t slotid);
 
 /*
- * @func  : configure_endpoint
+ * @func  : xhci_configure_endpoint
  * @brief : send the USB configure endpoint command to device
  * @param[in] xhci reference to xhci structure
  */
-void configure_endpoint(struct xhci_data *xhci_ptr);
+void xhci_configure_endpoint(struct xhci_data *xhci_ptr);
 
 /*
- * @func  : evaluate_endpoint:
+ * @func  : xhci_evaluate_endpoint:
  * @brief : send the USB evaluate endpoint command
  * @param[in] xhci reference to xhci structure
  */
-void evaluate_endpoint(struct xhci_data *xhci_ptr);
+void xhci_evaluate_endpoint(struct xhci_data *xhci_ptr);
 
 /*
- * @func  : update_ep_transfer_ring
+ * @func  : xhci_update_ep_transfer_ring
  * @brief : Update the endpoint transfer ring
  * @param[in] xhci reference to xhci structure
  * @param[in] xtr_ring  updated endpoint transfer ring
  */
-void update_ep_transfer_ring(xcr_command_ring_t *xcr_ring,
+void xhci_update_ep_transfer_ring(xcr_command_ring_t *xcr_ring,
         xhci_trb_t *xtr_ring);
 
 /*
- * @func  : get_cmdring_enq_ptr
+ * @func  : xhci_get_cmdring_enq_ptr
  * @brief : find the enqueue pointer location for the ring
  * @param[in] cmd_ring command ring reference pointer
  * @return xhci_trb_t* reference to enqueue pointer
  */
-xhci_trb_t *get_cmdring_enq_ptr(xcr_command_ring_t *cmd_ring);
+xhci_trb_t *xhci_get_cmdring_enq_ptr(xcr_command_ring_t *cmd_ring);
+
+/**
+ * @brief  queue a Reset Endpoint command (clears the Halted state after a STALL)
+ * @param[in] xcr_ring command ring
+ * @param[in] slot_id device slot
+ * @param[in] dci endpoint device context index
+ */
+void xhci_reset_endpoint_command(xcr_command_ring_t *xcr_ring, uint8_t slot_id, uint8_t dci);
+
+/**
+ * @brief  queue a Set TR Dequeue Pointer command for an endpoint
+ * @param[in] xcr_ring command ring
+ * @param[in] slot_id device slot
+ * @param[in] dci endpoint device context index
+ * @param[in] deq_ptr new dequeue pointer (16-byte aligned TRB)
+ * @param[in] dcs dequeue cycle state
+ */
+void xhci_set_tr_dequeue_command(xcr_command_ring_t *xcr_ring, uint8_t slot_id, uint8_t dci,
+        xhci_trb_t *deq_ptr, uint8_t dcs);
 
 #endif /*__XHCI_COMMANDS_H__*/

@@ -85,7 +85,7 @@ typedef struct {
   uint32_t uframe_countdown; // micro-frame count down to transfer for periodic, only need 18-bit
 
   uint8_t* buffer;
-  uint16_t buflen;
+  uint32_t buflen;
 } hcd_endpoint_t;
 
 // Additional info for each channel when it is active
@@ -99,7 +99,7 @@ typedef struct {
   };
   uint8_t result;
 
-  uint16_t xferred_bytes;  // bytes that accumulate transferred though USB bus for the whole hcd_edpt_xfer(), which can
+  uint32_t xferred_bytes;  // bytes that accumulate transferred though USB bus for the whole hcd_edpt_xfer(), which can
                            // be composed of multiple channel_xfer_start() (retry with NAK/NYET)
   uint16_t fifo_bytes;     // bytes written/read from/to FIFO (may not be transferred on USB bus).
 } hcd_xfer_t;
@@ -364,6 +364,9 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
   tu_memclr(&_hcd_data, sizeof(_hcd_data));
 
+  // MCU specific bring-up (e.g. release from SoC reset) before the first core register access
+  TU_ASSERT(dwc2_mcu_init(rhport));
+
   // Core Initialization
   const bool is_highspeed = dwc2_core_is_highspeed(dwc2, TUSB_ROLE_HOST);
   const bool is_dma = dma_host_enabled(dwc2);
@@ -594,7 +597,7 @@ static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
     channel->hcintmsk = hcintmsk;
     dwc2->haintmsk |= TU_BIT(ch_id);
 
-    channel->hcdma = (uint32_t) edpt->buffer;
+    channel->hcdma = (uint32_t) (uintptr_t) edpt->buffer;
 
     if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
       channel_send_in_token(dwc2, channel);
@@ -647,7 +650,7 @@ static bool edpt_xfer_kickoff(dwc2_regs_t* dwc2, uint8_t ep_id) {
 }
 
 // Submit a transfer, when complete hcd_event_xfer_complete() must be invoked
-bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t buflen) {
+bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen) {
   dwc2_regs_t* dwc2 = DWC2_REG(rhport);
   const uint8_t ep_num = tu_edpt_number(ep_addr);
   const uint8_t ep_dir = tu_edpt_dir(ep_addr);
@@ -1131,7 +1134,6 @@ static bool handle_channel_out_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hc
   hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
   hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
 
   bool is_done = false;
@@ -1216,7 +1218,7 @@ static void handle_channel_irq(uint8_t rhport, bool in_isr) {
           is_done = handle_channel_in_dma(dwc2, ch_id, hcint);
           if (is_done && (channel->hcdma > xfer->xferred_bytes)) {
             // hcdma is increased by word --> need to align4
-            hcd_dcache_invalidate((void*) tu_align4(channel->hcdma - xfer->xferred_bytes), xfer->xferred_bytes);
+            hcd_dcache_invalidate((void*) (uintptr_t) tu_align4(channel->hcdma - xfer->xferred_bytes), xfer->xferred_bytes);
           }
         }
         #endif

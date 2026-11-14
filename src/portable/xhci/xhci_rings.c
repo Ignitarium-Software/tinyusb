@@ -8,9 +8,7 @@
  */
 
 #include <stdlib.h>
-#include "socfpga_cache.h"
-#include "socfpga_defines.h"
-#include "osal_log.h"
+#include "xhci_port.h"
 #include "xhci.h"
 
 /*************************************************************************************************/
@@ -39,19 +37,19 @@ int xhci_crcr_init(xcr_command_ring_t *xcr_ring)
     uint32_t crcr_write_val;
     int ret;
 
-    xcr_ring->xcr_dequeue_ptr = allocate_ring_segment(64, XHCI_CR_TRB_LEN);
+    xcr_ring->xcr_dequeue_ptr = xhci_allocate_ring_segment(64, XHCI_CR_TRB_LEN);
     if (xcr_ring->xcr_dequeue_ptr == NULL)
     {
         return -ENOMEM;
     }
 
     /* memory alignment check */
-    ret = is_ptr_mem_aligned((uint64_t)xcr_ring->xcr_dequeue_ptr, 64U);
+    ret = xhci_is_ptr_mem_aligned((uint64_t)xcr_ring->xcr_dequeue_ptr, 64U);
     if (ret != 0)
     {
         if (xcr_ring->xcr_dequeue_ptr != NULL)
         {
-            vPortFree(xcr_ring->xcr_dequeue_ptr);
+            XHCI_MEM_FREE(xcr_ring->xcr_dequeue_ptr);
         }
         return ret;
     }
@@ -63,13 +61,13 @@ int xhci_crcr_init(xcr_command_ring_t *xcr_ring)
             USB3_CRCR_LO_CMD_RING_PNTR_MASK);
     crcr_write_val |= (xcr_ring->xcr_ccs_flag);
 
-    WR_REG32((USBBASE + USB3_CRCR_LO), crcr_write_val);
+    WR_REG32((XHCI_BASE_ADDR + USB3_CRCR_LO), crcr_write_val);
     INFO("Command Ring Register updated");
 
     return 0;
 }
 
-int init_xhc_event_ring(struct xhci_data *xhci_ptr)
+int xhci_init_event_ring(struct xhci_data *xhci_ptr)
 {
     int ret;
     uint64_t ring_addr;
@@ -88,7 +86,7 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     reg_val |= XHCI_EVENT_RING_TABLE_SZ;
     WR_REG32((rt_base_addr + USB3_ERSTSZ), reg_val);
 
-    xer_ring->erst_ptr = (xhci_erst_entry_t *)(uintptr_t) pvPortAlignedAlloc(64,
+    xer_ring->erst_ptr = (xhci_erst_entry_t *)(uintptr_t) XHCI_MEM_ALLOC_ALIGNED(64,
             1U * sizeof(xhci_erst_entry_t));
     if (xer_ring->erst_ptr == NULL)
     {
@@ -96,20 +94,20 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
         return -ENOMEM;
     }
 
-    ret = is_ptr_mem_aligned((uint64_t)xer_ring->erst_ptr, 64U);
+    ret = xhci_is_ptr_mem_aligned((uint64_t)xer_ring->erst_ptr, 64U);
     if (ret != 0)
     {
         ERROR("Memory alignment error!!!");
         if (xer_ring->erst_ptr != NULL)
         {
-            vPortFree(xer_ring->erst_ptr);
+            XHCI_MEM_FREE(xer_ring->erst_ptr);
         }
         return ret;
     }
 
     bzero(xer_ring->erst_ptr, sizeof(xhci_erst_entry_t));
 
-    xer_ring->xer_enqueue_ptr = (xhci_trb_t *)(uintptr_t) pvPortAlignedAlloc(64,
+    xer_ring->xer_enqueue_ptr = (xhci_trb_t *)(uintptr_t) XHCI_MEM_ALLOC_ALIGNED(64,
             XHCI_EVENT_RING_SEG_LENGTH * sizeof(xhci_trb_t));
 
     if (xer_ring->xer_enqueue_ptr == NULL)
@@ -119,13 +117,13 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     }
 
     /* memory alignment check */
-    ret = is_ptr_mem_aligned((uint64_t)xer_ring->xer_enqueue_ptr, 64U);
+    ret = xhci_is_ptr_mem_aligned((uint64_t)xer_ring->xer_enqueue_ptr, 64U);
     if (ret != 0)
     {
         ERROR("Memory alignment error!!!");
         if (xer_ring->xer_enqueue_ptr != NULL)
         {
-            vPortFree(xer_ring->xer_enqueue_ptr);
+            XHCI_MEM_FREE(xer_ring->xer_enqueue_ptr);
         }
         return ret;
     }
@@ -150,23 +148,23 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     erdp_reg_val |= ring_addr;
     WR_REG64((rt_base_addr + USB3_ERDP_LO), erdp_reg_val);
 
-    cache_force_write_back((void *)(uintptr_t) xer_ring->erst_ptr,
+    xhci_dcache_clean((void *)(uintptr_t) xer_ring->erst_ptr,
             sizeof(xhci_erst_entry_t));
-    cache_force_write_back((void *)(uintptr_t) xer_ring->xer_enqueue_ptr,
+    xhci_dcache_clean((void *)(uintptr_t) xer_ring->xer_enqueue_ptr,
             XHCI_EVENT_RING_SEG_LENGTH * sizeof(xhci_trb_t));
 
     INFO("Event Ring configured successfully");
     return 0;
 }
 
-xhci_trb_t *allocate_ring_segment(int req_byte_align, int req_trb_len)
+xhci_trb_t *xhci_allocate_ring_segment(int req_byte_align, int req_trb_len)
 {
     int ret;
     xhci_trb_t *xtr = NULL;
     xhci_trb_t *link_trb;
     uint32_t ring_ctrl_flags = 0U;
 
-    xtr = (xhci_trb_t *)pvPortAlignedAlloc(req_byte_align,
+    xtr = (xhci_trb_t *)XHCI_MEM_ALLOC_ALIGNED(req_byte_align,
             (size_t)req_trb_len * sizeof(xhci_trb_t));
     if (xtr == NULL)
     {
@@ -177,13 +175,13 @@ xhci_trb_t *allocate_ring_segment(int req_byte_align, int req_trb_len)
     bzero(xtr, (size_t)req_trb_len * sizeof(xhci_trb_t));
 
     /* memory alignment check */
-    ret = is_ptr_mem_aligned((uint64_t)xtr, (uint32_t)req_byte_align);
+    ret = xhci_is_ptr_mem_aligned((uint64_t)xtr, (uint32_t)req_byte_align);
     if (ret != 0)
     {
         ERROR("Memory alignment error!!!");
         if (xtr != NULL)
         {
-            vPortFree(xtr);
+            XHCI_MEM_FREE(xtr);
         }
         return NULL;
     }
@@ -198,15 +196,15 @@ xhci_trb_t *allocate_ring_segment(int req_byte_align, int req_trb_len)
     ring_ctrl_flags |= ((uint32_t) LINK_TRB << 10);
     link_trb->control = ring_ctrl_flags;
 
-    cache_force_write_back(xtr, (size_t) req_trb_len * sizeof(xhci_trb_t));
+    xhci_dcache_clean(xtr, (size_t) req_trb_len * sizeof(xhci_trb_t));
 
     return xtr;
 }
 
-xcr_command_ring_t *alloc_command_ring(void)
+xcr_command_ring_t *xhci_alloc_command_ring(void)
 {
     xcr_command_ring_t *xcr_ring;
-    xcr_ring = (xcr_command_ring_t *)malloc(sizeof(xcr_command_ring_t));
+    xcr_ring = (xcr_command_ring_t *)XHCI_MEM_ALLOC(sizeof(xcr_command_ring_t));
     if (xcr_ring == NULL)
     {
         ERROR("Canot allocate memory!!!");
@@ -215,7 +213,7 @@ xcr_command_ring_t *alloc_command_ring(void)
     return xcr_ring;
 }
 
-int is_link_trb(xhci_trb_t *ptr)
+int xhci_is_link_trb(xhci_trb_t *ptr)
 {
     uint32_t trb_id;
 
@@ -229,7 +227,7 @@ int is_link_trb(xhci_trb_t *ptr)
     return 0;
 }
 
-xhci_trb_t *get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag)
+xhci_trb_t *xhci_get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag)
 {
     uint32_t link_ctrl = 0U;
     xhci_trb_t *next_seg_trb_ptr = NULL;
@@ -241,7 +239,7 @@ xhci_trb_t *get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag)
     link_ctrl |= (*pcs_flag);
 
     link_trb->control = link_ctrl;
-    cache_force_write_back((void *)(uintptr_t) link_trb, sizeof(xhci_trb_t));
+    xhci_dcache_clean((void *)(uintptr_t) link_trb, sizeof(xhci_trb_t));
 
     if ((link_trb->control & 0x00000002U) != 0U)
     {

@@ -36,6 +36,9 @@
 // - dwc2_phy_init/dwc2_phy_update: phy init called before and after core reset
 // - dwc2_dcd_int_enable/dwc2_dcd_int_disable
 // - dwc2_remote_wakeup_delay
+// Optional symbols that port header may define:
+// - dwc2_mcu_init (+ #define DWC2_MCU_INIT_HOOK): called by hcd_init() before the first core register
+//   access, e.g. to release the controller from SoC-level reset
 
 #if defined(TUP_USBIP_DWC2_STM32)
   #include "dwc2_stm32.h"
@@ -51,8 +54,17 @@
   #include "dwc2_xmc.h"
 #elif defined(TUP_USBIP_DWC2_AT32)
   #include "dwc2_at32.h"
+#elif TU_CHECK_MCU(OPT_MCU_SOCFPGA)
+  #include "dwc2_socfpga.h"
 #else
   #error "Unsupported MCUs"
+#endif
+
+#ifndef DWC2_MCU_INIT_HOOK
+TU_ATTR_ALWAYS_INLINE static inline bool dwc2_mcu_init(uint8_t rhport) {
+  (void) rhport;
+  return true;
+}
 #endif
 
 enum {

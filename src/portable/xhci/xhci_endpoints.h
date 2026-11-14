@@ -69,7 +69,7 @@ static inline uint8_t get_endpoint_num(uint8_t ep_addr)
  * @param[in]  xhci_ptr -  endpoint address
  * @return  device context index
  */
-uint8_t get_ep_dci(uint8_t ep_addr);
+uint8_t xhci_get_ep_dci(uint8_t ep_addr);
 
 /**
  * @brief  initialize the endpoint0 transfer ring for control transfers
@@ -77,7 +77,7 @@ uint8_t get_ep_dci(uint8_t ep_addr);
  * @param[in]  buffer reference to buffer to hold the control transfer data
  * @param[in]  setup_req reference to the USB control request
  */
-void configure_setup_stage(struct xhci_data *xhci, void *buffer,
+void xhci_configure_setup_stage(struct xhci_data *xhci, void *buffer,
         usb_control_request_t *setup_req);
 
 /**
@@ -91,7 +91,7 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
  *  true  , on successful transfer
  *  false , on failure
  */
-bool endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
+bool xhci_endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
         void *buffer, uint32_t buflen);
 
 #endif  /*__XHCI_ENDPOINTS_H__ */

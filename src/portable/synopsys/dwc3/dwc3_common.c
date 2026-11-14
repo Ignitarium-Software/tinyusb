@@ -6,15 +6,18 @@
  * Low level driver implementation for DWC3 driver
  */
 
-#include "dwc3_ll.h"
-#include "socfpga_usb3_reg.h"
-#include "socfpga_defines.h"
+#include "tusb_option.h"
+
+#if CFG_TUH_ENABLED && defined(TUP_USBIP_DWC3)
+
 #include <errno.h>
+#include "osal/osal.h"
+#include "dwc3_common.h"
 
 /*
  * @brief Configures the DWC3 to operate in host mode
  */
-int dwc3_set_usb_host_mode(uint32_t ghwparams0)
+static int dwc3_set_usb_host_mode(uint32_t ghwparams0)
 {
     uint32_t reg_val;
     uint8_t usb_mode = (uint8_t) (ghwparams0 &
@@ -23,37 +26,37 @@ int dwc3_set_usb_host_mode(uint32_t ghwparams0)
     if (usb_mode == DWC3_GHWPARAMS0_MODE_DRD)
     {
         /* Suspend both USB3 & USB2 PHYs before setting HOST mode */
-        reg_val = RD_REG32((USBBASE + USB3_GUSB3PIPECTL));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GUSB3PIPECTL));
         reg_val &= ~(USB3_GUSB3PIPECTL_SUSPENDENABLE_MASK);
-        WR_REG32((USBBASE + USB3_GUSB3PIPECTL), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GUSB3PIPECTL), reg_val);
 
-        reg_val = RD_REG32((USBBASE + USB3_GUSB2PHYCFG));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GUSB2PHYCFG));
         reg_val &= ~(USB3_GUSB2PHYCFG_SUSPENDUSB20_MASK);
-        WR_REG32((USBBASE + USB3_GUSB2PHYCFG), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GUSB2PHYCFG), reg_val);
 
         /* Clear 12, 13 bit of GCTL register before setting to host mode */
-        reg_val = RD_REG32((USBBASE + USB3_GCTL));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GCTL));
         reg_val &= ~(USB3_GCTL_PRTCAPDIR_MASK);
         reg_val |= (USB_MODE_HOST << USB3_GCTL_PRTCAPDIR_POS);
-        WR_REG32((USBBASE + USB3_GCTL), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GCTL), reg_val);
 
-        reg_val = RD_REG32((USBBASE + USB3_GCTL));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GCTL));
         reg_val |= (USB3_GCTL_CORESOFTRESET_MASK);
-        WR_REG32((USBBASE + USB3_GCTL), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GCTL), reg_val);
 
         osal_task_delay(100);
 
-        reg_val = RD_REG32((USBBASE + USB3_GCTL));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GCTL));
         reg_val &= ~(USB3_GCTL_CORESOFTRESET_MASK);
-        WR_REG32((USBBASE + USB3_GCTL), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GCTL), reg_val);
 
-        reg_val = RD_REG32((USBBASE + USB3_GUSB2PHYCFG));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GUSB2PHYCFG));
         reg_val |= (USB3_GUSB2PHYCFG_SUSPENDUSB20_MASK);
-        WR_REG32((USBBASE + USB3_GUSB2PHYCFG), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GUSB2PHYCFG), reg_val);
 
-        reg_val = RD_REG32((USBBASE + USB3_GUSB3PIPECTL));
+        reg_val = RD_REG32((DWC3_REG_BASE + USB3_GUSB3PIPECTL));
         reg_val |= ((uint32_t) 1U << 17);
-        WR_REG32((USBBASE + USB3_GUSB3PIPECTL), reg_val);
+        WR_REG32((DWC3_REG_BASE + USB3_GUSB3PIPECTL), reg_val);
 
     }
     else if (usb_mode == DWC3_GHWPARAMS0_MODE_HOST)
@@ -72,7 +75,7 @@ int dwc3_set_usb_host_mode(uint32_t ghwparams0)
 /*
  * @brief Configures the USB2 phy
  */
-void usb2_phy_setup(uint32_t ghwparams3)
+static void usb2_phy_setup(uint32_t ghwparams3)
 {
     uint32_t reg_val;
     uint8_t hs_phy;
@@ -90,9 +93,9 @@ void usb2_phy_setup(uint32_t ghwparams3)
 
         case DWC3_HS_PHY_UTMI_ULPI:
             /* select ULPI phy */
-            reg_val = RD_REG32(USBBASE + USB3_GUSB2PHYCFG);
+            reg_val = RD_REG32(DWC3_REG_BASE + USB3_GUSB2PHYCFG);
             reg_val |= USB3_GUSB2PHYCFG_ULPI_UTMI_SEL_MASK;
-            WR_REG32((USBBASE + USB3_GUSB2PHYCFG), reg_val);
+            WR_REG32((DWC3_REG_BASE + USB3_GUSB2PHYCFG), reg_val);
             break;
         default:
             /*do nothing*/
@@ -103,7 +106,7 @@ void usb2_phy_setup(uint32_t ghwparams3)
 /*
  * @brief Get the USB3 phy info
  */
-uint32_t get_usb3_phy_info(uint32_t ghwparams3)
+static uint32_t get_usb3_phy_info(uint32_t ghwparams3)
 {
     uint8_t ss_phy;
 
@@ -138,12 +141,12 @@ uint32_t get_usb3_phy_info(uint32_t ghwparams3)
 /*
  * @brief Configure the DWC3 GCTL register
  */
-void setup_dwc3_gctl(uint32_t ghwparams1)
+static void setup_dwc3_gctl(uint32_t ghwparams1)
 {
     uint32_t reg_val;
     uint8_t power_opt_mode;
 
-    reg_val = RD_REG32(USBBASE + USB3_GCTL);
+    reg_val = RD_REG32(DWC3_REG_BASE + USB3_GCTL);
     reg_val &= ~USB3_GCTL_SCALEDOWN_MASK;
 
     power_opt_mode = (uint8_t) ((ghwparams1 &
@@ -165,5 +168,48 @@ void setup_dwc3_gctl(uint32_t ghwparams1)
             break;
     }
 
-    WR_REG32((USBBASE + USB3_GCTL), reg_val);
+    WR_REG32((DWC3_REG_BASE + USB3_GCTL), reg_val);
 }
+
+/*
+ * @brief Initialize the DWC3 core in host (xHCI) mode
+ */
+int dwc3_init(void)
+{
+    uint32_t ghwparams0 = RD_REG32(DWC3_REG_BASE + USB3_GHWPARAMS0);
+    uint32_t ghwparams1 = RD_REG32(DWC3_REG_BASE + USB3_GHWPARAMS1);
+    uint32_t ghwparams3 = RD_REG32(DWC3_REG_BASE + USB3_GHWPARAMS3);
+    uint32_t phy_info;
+    int ret = 0;
+
+    phy_info = get_usb3_phy_info(ghwparams3);
+    switch (phy_info)
+    {
+        case DWC3_SS_PHY_3_0:
+            INFO("Device supportes USB 3.0 Only");
+            break;
+
+        case DWC3_SS_PHY_3_1:
+            INFO("Device supportes USB 3.1 Gen1");
+            break;
+
+        default:
+            INFO("Device does not support USB3.1");
+            break;
+    }
+
+    usb2_phy_setup(ghwparams3);
+
+    setup_dwc3_gctl(ghwparams1);
+
+    ret = dwc3_set_usb_host_mode(ghwparams0);
+    if (ret != 0)
+    {
+        ERROR("Unable to setup DWC3 in host mode");
+        return ret;
+    }
+
+    return 0;
+}
+
+#endif

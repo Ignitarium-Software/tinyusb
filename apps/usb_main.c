@@ -12,6 +12,14 @@
 #define USB3_HS_PORT    (1)
 #define USB3_SS_PORT    (2)
 
+/* Host controllers in this build, set by hw/bsp/socfpga/family.cmake (SOCFPGA_HCD) */
+#ifndef SOCFPGA_HCD_DWC2
+#define SOCFPGA_HCD_DWC2    1
+#endif
+#ifndef SOCFPGA_HCD_DWC3
+#define SOCFPGA_HCD_DWC3    1
+#endif
+
 int usb_wait_to_mount(int timeout)
 {
     while (timeout >= 0)
@@ -40,6 +48,7 @@ void usb_task(void *arg)
         .speed = TUSB_SPEED_AUTO
     };
 
+#if SOCFPGA_HCD_DWC2
     /*initialize host stack for usb otg HS port*/
     if (!tusb_init(USB_OTG_PORT, &host_init))
     {
@@ -50,7 +59,9 @@ void usb_task(void *arg)
     {
         PRINT("USB OTG port initialized successfully");
     }
+#endif
 
+#if SOCFPGA_HCD_DWC3
    /*initialize host stack for usb3 SS port*/
     if (!tusb_init(USB3_SS_PORT, &host_init))
     {
@@ -58,7 +69,7 @@ void usb_task(void *arg)
     }
 
     else
-    {    
+    {
         /*initialize host stack for usb3 HS port*/
         if (!tusb_init(USB3_HS_PORT, &host_init))
         {
@@ -69,6 +80,7 @@ void usb_task(void *arg)
             PRINT("USB3.1 port initialized successfully");
         }
     }
+#endif
     while (1)
     {
         tuh_task();

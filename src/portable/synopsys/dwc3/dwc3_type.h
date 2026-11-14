@@ -3,14 +3,14 @@
  *
  * SPDX-License-Identifier: MIT-0
  *
- * This contains the register defintions for Agilex5 USB3.1 controller
+ * Register map of the Synopsys DWC3 (USB3.1 DRD) core: xHCI capability/operational/runtime
+ * registers, DWC3 global, device and link registers, as offsets from the core base address.
+ * Generated for the Agilex5 USB3.1 controller instance; the SoC base address lives in the
+ * vendor header (dwc3_socfpga.h).
  */
 
-#ifndef __SOCFPGA_USB3_REG_H__
-#define __SOCFPGA_USB3_REG_H__
-
-/* USB 3.1 controller base address */
-#define USBBASE                                      (0x11000000U)
+#ifndef TUSB_DWC3_TYPE_H_
+#define TUSB_DWC3_TYPE_H_
 
 /* CAPLENGTH */
 #define USB3_CAPLENGTH                               0x0000U
@@ -2657,4 +2657,4 @@
 #define USB3_RSVD_REG_RSVD_FIELD_MASK                            0xFFFFFFFFU
 #define USB3_RSVD_REG_RSVD_FIELD_POS                             0U
 
-#endif
+#endif /* TUSB_DWC3_TYPE_H_ */

@@ -148,7 +148,7 @@ typedef struct
  * @brief  function to display the event ring TRBs
  * @param[in]  xhci reference to xhci data structure
  */
-void display_event_trbs(struct xhci_data *xhci);
+void xhci_display_event_trbs(struct xhci_data *xhci);
 
 /*
  * @brief get the xhci event from the event ring
@@ -156,13 +156,13 @@ void display_event_trbs(struct xhci_data *xhci);
  * @return
  *   event ring parameters
  */
-xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr);
+xhci_event_trb_t xhci_get_event(struct xhci_data *xhci_ptr);
 
 /*
  * @brief  Get the xhci RH port  link speed
  * @param[in] rhport rh port id of the corresponding port
  */
-uint8_t get_xhc_port_speed(uint8_t rhport);
+uint8_t xhci_get_port_speed(uint8_t rhport);
 
 /*
  * @brief  get the RH port conntect status
@@ -190,33 +190,33 @@ void reset_xhci_port(uint8_t rhport);
  * @param[in] psc_event PSCEG event TRB
  * @return port number and attach/detach flag
  */
-xhci_psceg_params_t handle_psceg_event(xpsc_event_t psc_event);
+xhci_psceg_params_t xhci_handle_psceg_event(xpsc_event_t psc_event);
 
 /*
  * @brief update the device address in the xhci structure
  * @param[in]  xhci -  reference of xhci hcd controller
  */
-void update_device_address(struct xhci_data *xhci_ptr);
+void xhci_update_device_address(struct xhci_data *xhci_ptr);
 
 /*
  * @brief update the device speed in the xhci structure
  * @param[in]  xhci_ptr -  reference of xhci hcd controller
  */
-void update_device_dev_speed(struct xhci_data *xhci_ptr);
+void xhci_update_device_dev_speed(struct xhci_data *xhci_ptr);
 
 /*
  * @brief update the device slot id  in the xhci structure
  * @param[in]  dev_data -  reference of xhci_device_data structure
  * @param[in]  slot_id  -  slot id of the attached device
  */
-void update_device_slot_id(struct xhci_device_data *dev_data, uint8_t slot_id);
+void xhci_update_device_slot_id(struct xhci_device_data *dev_data, uint8_t slot_id);
 
 /*
  * @brief  update the device roothub parameters in the xhci structure
  * @param[in]  xhci_ptr   -  reference of xhci hcd controller
  * @param[in]  rh_params  -  roothub parameters
  */
-void update_device_rh_params(struct xhci_data *xhci_ptr,
+void xhci_update_device_rh_params(struct xhci_data *xhci_ptr,
         xhci_psceg_params_t rh_params);
 
 /*

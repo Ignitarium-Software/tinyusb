@@ -93,14 +93,14 @@ int xhci_crcr_init(xcr_command_ring_t *xcr_ring);
  *  xhci_trb_t* reference to Transfer ring structure
  *  NULL, if allocation is unsuccessful
  */
-xhci_trb_t *allocate_ring_segment(int req_byte_align, int req_trb_len);
+xhci_trb_t *xhci_allocate_ring_segment(int req_byte_align, int req_trb_len);
 
 /**
  * @brief  allocate xhci command ring structure
  * @return
  *  xcr_command_ring_t* reference to command ring structure
  */
-xcr_command_ring_t *alloc_command_ring(void);
+xcr_command_ring_t *xhci_alloc_command_ring(void);
 
 /**
  * @brief  check whether the trb is a link trb or not
@@ -109,7 +109,7 @@ xcr_command_ring_t *alloc_command_ring(void);
  *   1 - if it is a link trb
  *   0 - if it is not a link trb
  */
-int is_link_trb(xhci_trb_t *ptr);
+int xhci_is_link_trb(xhci_trb_t *ptr);
 
 /**
  * @brief  find the next segment of the transfer ring/command ring
@@ -117,6 +117,6 @@ int is_link_trb(xhci_trb_t *ptr);
  * @param[in] pcs_flag reference to current segment pcs flag
  * @return xhci_trb_t* reference to new trb segment
  */
-xhci_trb_t *get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag);
+xhci_trb_t *xhci_get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag);
 
 #endif /* __XHCI_RINGS_H__ */

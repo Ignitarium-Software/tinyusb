@@ -9,15 +9,13 @@
 
 #include <stdio.h>
 #include "xhci_events.h"
-#include "socfpga_defines.h"
-#include "socfpga_cache.h"
-#include "osal_log.h"
+#include "xhci_port.h"
 
 static void erdp_register_update();
 
-void display_event_trbs(struct xhci_data *xhci)
+void xhci_display_event_trbs(struct xhci_data *xhci)
 {
-    cache_force_invalidate((void *) xhci->xer_ring.xer_enqueue_ptr,
+    xhci_dcache_invalidate((void *) xhci->xer_ring.xer_enqueue_ptr,
             (size_t) (XHCI_EVENT_RING_SEG_LENGTH * sizeof(xhci_trb_t)));
     for (int i = 0; i < 10; i++)
     {
@@ -31,7 +29,7 @@ void display_event_trbs(struct xhci_data *xhci)
     }
 }
 
-uint8_t get_xhc_port_speed(uint8_t rhport)
+uint8_t xhci_get_port_speed(uint8_t rhport)
 {
     uint32_t portsc_reg_val, portsc_reg;
     uint8_t port_speed;
@@ -113,7 +111,7 @@ bool is_xhci_port_reset_end(uint8_t rhport)
     return true;
 }
 
-xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr)
+xhci_event_trb_t xhci_get_event(struct xhci_data *xhci_ptr)
 {
     uint64_t erdp_addr;
     xhci_event_trb_type_t trb_id;
@@ -125,7 +123,7 @@ xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr)
     erdp_addr = RD_REG32(ERDP);
     erdp_addr &= 0xfffffff0UL;
 
-    cache_force_invalidate((void *)erdp_addr, sizeof(xhci_trb_t));
+    xhci_dcache_invalidate((void *)erdp_addr, sizeof(xhci_trb_t));
 
     xhci_trb_t *event_trb = (xhci_trb_t *)(uint64_t)erdp_addr;
 
@@ -182,7 +180,7 @@ static void erdp_register_update(xer_event_ring_t *xer_ring)
     WR_REG64(ERDP, erdp_addr);
 }
 
-xhci_psceg_params_t handle_psceg_event(xpsc_event_t psc_event)
+xhci_psceg_params_t xhci_handle_psceg_event(xpsc_event_t psc_event)
 {
     uint32_t portsc_reg, portsc_register, temp = 0U;
     xhci_psceg_params_t port_params = { 0 };

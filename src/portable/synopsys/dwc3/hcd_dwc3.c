@@ -1,7 +1,9 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2024 Ha Thach (tinyusb.org)
+ * Copyright (c) 2021 Koji Kitayama
+ * Portions copyrighted (c) 2021 Roland Winistoerfer
+ * Copyright (c) 2025 Altera Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,444 +26,291 @@
  * This file is part of the TinyUSB stack.
  */
 
+// Synopsys DWC3 host controller driver (xHCI mode), built on the generic library in src/portable/xhci.
+//
+// Current scope: one device (no hub), MSC bulk endpoints. The xHCI root hub exposes two TinyUSB
+// rhports (see DWC3_RHPORT_HS / DWC3_RHPORT_SS in the vendor header): controller init runs on the SS
+// rhport, interrupts are owned by the HS rhport, and the TinyUSB rhport equals the xHCI port number.
+
 #include "tusb_option.h"
 
-#if CFG_TUH_ENABLED && defined(TUP_USBIP_DWC2) && !CFG_TUH_MAX3421
-
-#if !(CFG_TUH_DWC2_SLAVE_ENABLE || CFG_TUH_DWC2_DMA_ENABLE)
-#error DWC2 require either CFG_TUH_DWC2_SLAVE_ENABLE or CFG_TUH_DWC2_DMA_ENABLE to be enabled
-#endif
-
-// Debug level for DWC2
-#define DWC2_DEBUG    2
+#if CFG_TUH_ENABLED && defined(TUP_USBIP_DWC3)
 
 #include "host/hcd.h"
 #include "host/usbh.h"
-#include "dwc2_common.h"
+#include "common/tusb_private.h"
+#include "dwc3_common.h"
+#include "xhci_commands.h"
+#include "xhci_endpoints.h"
+#include "xhci_interrupts.h"
+#include "xhci_doorbell.h"
+#include "xhci_events.h"
 
-// Max number of endpoints application can open, can be larger than DWC2_CHANNEL_COUNT_MAX
-#ifndef CFG_TUH_DWC2_ENDPOINT_MAX
-#define CFG_TUH_DWC2_ENDPOINT_MAX 16
-#endif
+#define XHCI_SPEED_SS    (4)
+#define XHCI_QUEUE_SZ    (10U)
+#define XHCI_DCI_MAX     (31)
 
-#define DWC2_CHANNEL_COUNT_MAX    16 // absolute max channel count
-TU_VERIFY_STATIC(CFG_TUH_DWC2_ENDPOINT_MAX <= 255, "currently only use 8-bit for index");
-
-enum {
-  HPRT_W1_MASK = HPRT_CONN_DETECT | HPRT_ENABLE | HPRT_ENABLE_CHANGE | HPRT_OVER_CURRENT_CHANGE | HPRT_SUSPEND
-};
-
-enum {
-  HCD_XFER_ERROR_MAX = 3
-};
-
-enum {
-  HCD_XFER_PERIOD_SPLIT_NYET_MAX = 3
-};
-
-//--------------------------------------------------------------------
-//
-//--------------------------------------------------------------------
-
-// Host driver struct for each opened endpoint
 typedef struct {
-  union {
-    uint32_t hcchar;
-    dwc2_channel_char_t hcchar_bm;
-  };
-  union {
-    uint32_t hcsplt;
-    dwc2_channel_split_t hcsplt_bm;
-  };
-
-  struct TU_ATTR_PACKED {
-    uint32_t uframe_interval : 18; // micro-frame interval
-    uint32_t speed           : 2;
-    uint32_t next_pid        : 2; // PID for next transfer
-    uint32_t next_do_ping    : 1; // Do PING for next transfer if possible (highspeed OUT)
-    // uint32_t : 9;
-  };
-
-  uint32_t uframe_countdown; // micro-frame count down to transfer for periodic, only need 18-bit
-
   uint8_t* buffer;
-  uint16_t buflen;
-} hcd_endpoint_t;
+  uint32_t buflen;
+} dwc3_ep_buf_t;
 
-// Additional info for each channel when it is active
-typedef struct {
-  volatile bool allocated;
-  uint8_t ep_id;
-  struct TU_ATTR_PACKED {
-    uint8_t err_count : 3;
-    uint8_t period_split_nyet_count : 3;
-    uint8_t halted_nyet : 1;
-  };
-  uint8_t result;
+//--------------------------------------------------------------------+
+// Driver state
+//--------------------------------------------------------------------+
+static struct xhci_data xhci_handle TU_ATTR_ALIGNED(64);
+static dwc3_ep_buf_t ep_data[XHCI_DCI_MAX];
+static tusb_control_request_t ctrl_req;
+static int usb_set_config = 0;
+static uint8_t device_addr = 0;
 
-  uint16_t xferred_bytes;  // bytes that accumulate transferred though USB bus for the whole hcd_edpt_xfer(), which can
-                           // be composed of multiple channel_xfer_start() (retry with NAK/NYET)
-  uint16_t fifo_bytes;     // bytes written/read from/to FIFO (may not be transferred on USB bus).
-} hcd_xfer_t;
+// Command completion events are produced by the ISR and consumed by the task issuing the command
+OSAL_QUEUE_DEF(NULL, dwc3_xhci_cmd_qdef, XHCI_QUEUE_SZ, xcc_event_t);
+static osal_queue_t xhci_cmd_q;
 
-typedef struct {
-  hcd_xfer_t xfer[DWC2_CHANNEL_COUNT_MAX];
-  hcd_endpoint_t edpt[CFG_TUH_DWC2_ENDPOINT_MAX];
-} hcd_data_t;
-
-hcd_data_t _hcd_data;
-
-//--------------------------------------------------------------------
-//
-//--------------------------------------------------------------------
-TU_ATTR_ALWAYS_INLINE static inline uint8_t dwc2_channel_count(const dwc2_regs_t* dwc2) {
-  const dwc2_ghwcfg2_t ghwcfg2 = {.value = dwc2->ghwcfg2};
-  return tu_min8(ghwcfg2.num_host_ch + 1, DWC2_CHANNEL_COUNT_MAX);
+//--------------------------------------------------------------------+
+// Internal helpers
+//--------------------------------------------------------------------+
+static bool cmd_queue_init(void) {
+  xhci_cmd_q = osal_queue_create(&dwc3_xhci_cmd_qdef);
+  return xhci_cmd_q != NULL;
 }
 
-TU_ATTR_ALWAYS_INLINE static inline tusb_speed_t hprt_speed_get(dwc2_regs_t* dwc2) {
-  tusb_speed_t speed;
-  const dwc2_hprt_t hprt = {.value = dwc2->hprt};
-  switch(hprt.speed) {
-    case HPRT_SPEED_HIGH: speed = TUSB_SPEED_HIGH; break;
-    case HPRT_SPEED_FULL: speed = TUSB_SPEED_FULL; break;
-    case HPRT_SPEED_LOW : speed = TUSB_SPEED_LOW ; break;
-    default:
-      speed = TUSB_SPEED_INVALID;
-      TU_BREAKPOINT();
-    break;
+static void cmd_event_complete(xcc_event_t event, bool in_isr) {
+  (void) osal_queue_send(xhci_cmd_q, &event, in_isr);
+}
+
+// Block (task context) until the command just queued completes
+static int wait_for_command_completion_event(struct xhci_data* xhci_ptr, int type) {
+  xcc_event_t event = {0};
+  while (!osal_queue_receive(xhci_cmd_q, &event, OSAL_TIMEOUT_WAIT_FOREVER)) {}
+
+  DEBUG("CC event values are");
+  DEBUG("pointer   : %lx", event.cmd_trb_ptr);
+  DEBUG("Status field  : %x", event.status_field);
+  DEBUG("Control fields : %x", event.control_field);
+
+  if (((event.status_field & 0xff000000U) >> 24) != 1U) {
+    return -1;
   }
-  return speed;
-}
 
-TU_ATTR_ALWAYS_INLINE static inline bool dma_host_enabled(const dwc2_regs_t* dwc2) {
-  (void) dwc2;
-  // Internal DMA only
-  const dwc2_ghwcfg2_t ghwcfg2 = {.value = dwc2->ghwcfg2};
-  return CFG_TUH_DWC2_DMA_ENABLE && ghwcfg2.arch == GHWCFG2_ARCH_INTERNAL_DMA;
-}
-
-#if CFG_TUH_MEM_DCACHE_ENABLE
-bool hcd_dcache_clean(const void* addr, uint32_t data_size) {
-  TU_VERIFY(addr && data_size);
-  return dwc2_dcache_clean(addr, data_size);
-}
-
-bool hcd_dcache_invalidate(const void* addr, uint32_t data_size) {
-  TU_VERIFY(addr && data_size);
-  return dwc2_dcache_invalidate(addr, data_size);
-}
-
-bool hcd_dcache_clean_invalidate(const void* addr, uint32_t data_size) {
-  TU_VERIFY(addr && data_size);
-  return dwc2_dcache_clean_invalidate(addr, data_size);
-}
-#endif
-
-// Allocate a channel for new transfer
-TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_alloc(dwc2_regs_t* dwc2) {
-  const uint8_t max_channel = dwc2_channel_count(dwc2);
-  for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-    if (!xfer->allocated) {
-      tu_memclr(xfer, sizeof(hcd_xfer_t));
-      xfer->allocated = true;
-      return ch_id;
-    }
+  if (type == ENABLE_SLOT_CMD) {
+    // Get slot id from the CC event trb
+    xhci_update_device_slot_id(&xhci_ptr->dev_data, (uint8_t) ((event.control_field & 0xff000000U) >> 24));
   }
-  return TUSB_INDEX_INVALID_8;
+
+  xhci_ptr->xcr_ring->xcr_dequeue_ptr = (xhci_trb_t*) (event.cmd_trb_ptr);
+  return 0;
 }
 
-// Check if is periodic (interrupt/isochronous)
-TU_ATTR_ALWAYS_INLINE static inline bool channel_is_periodic(uint32_t hcchar) {
-  const dwc2_channel_char_t hcchar_bm = {.value = hcchar};
-  return hcchar_bm.ep_type == HCCHAR_EPTYPE_INTERRUPT || hcchar_bm.ep_type == HCCHAR_EPTYPE_ISOCHRONOUS;
-}
-
-TU_ATTR_ALWAYS_INLINE static inline uint8_t req_queue_avail(const dwc2_regs_t* dwc2, bool is_period) {
-  if (is_period) {
-    const dwc2_hptxsts_t hptxsts = {.value = dwc2->hptxsts};
-    return hptxsts.req_queue_available;
-  } else {
-    const dwc2_hnptxsts_t hnptxsts = {.value = dwc2->hnptxsts};
-    return hnptxsts.req_queue_available;
+// Only the USB2 (HS) root-hub port needs an explicit reset
+static void reset_usb_port(uint8_t rhport) {
+  if (rhport == DWC3_RHPORT_HS) {
+    reset_xhci_port(rhport);
   }
 }
 
-TU_ATTR_ALWAYS_INLINE static inline void channel_dealloc(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  xfer->allocated = false;
-  dwc2->haintmsk &= ~TU_BIT(ch_id);
-}
-
-TU_ATTR_ALWAYS_INLINE static inline bool channel_disable(const dwc2_regs_t* dwc2, dwc2_channel_t* channel) {
-  // disable also require request queue
-  TU_ASSERT(req_queue_avail(dwc2, channel_is_periodic(channel->hcchar)));
-  channel->hcintmsk |= HCINT_HALTED;
-  channel->hcchar |= HCCHAR_CHDIS | HCCHAR_CHENA; // must set both CHDIS and CHENA
+static bool usb_port_reset_end(uint8_t rhport) {
+  if (rhport == DWC3_RHPORT_HS) {
+    return is_xhci_port_reset_end(rhport);
+  }
   return true;
 }
 
-// attempt to send IN token to receive data
-TU_ATTR_ALWAYS_INLINE static inline bool channel_send_in_token(const dwc2_regs_t* dwc2, dwc2_channel_t* channel) {
-  TU_ASSERT(req_queue_avail(dwc2, channel_is_periodic(channel->hcchar)));
-  channel->hcchar |= HCCHAR_CHENA;
+static bool hcd_enable_slot(void) {
+  xhci_enable_slot_command(xhci_handle.xcr_ring);
+  return wait_for_command_completion_event(&xhci_handle, ENABLE_SLOT_CMD) == 0;
+}
+
+static bool hcd_send_address_cmd(void) {
+  xhci_update_device_dev_speed(&xhci_handle);
+
+  int ret = xhci_init_input_device_context(&xhci_handle);
+  if (ret != 0) {
+    ERROR("XHCI Error -%d!!!", ret);
+    return false;
+  }
+
+  xhci_update_dcbaa_entry(&xhci_handle);
+  xhci_set_device_address(&xhci_handle);
+
+  if (wait_for_command_completion_event(&xhci_handle, ADDRESS_DEVICE_CMD) != 0) {
+    return false;
+  }
+
+  xhci_update_device_address(&xhci_handle);
+
+  if (xhci_handle.dev_data.dev_addr == 0U) {
+    return false; // device address can not be zero after address command is sent
+  }
+
+  display_xhci_device_params(&xhci_handle.dev_data);
+  xhci_display_ip_context(xhci_handle.ip_ctx);
+  xhci_display_op_context(xhci_handle.op_ctx);
+  xhci_display_event_trbs(&xhci_handle);
+
   return true;
 }
 
-// Find currently enabled channel. Note: EP0 is bidirectional
-TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_find_enabled(dwc2_regs_t* dwc2, uint8_t dev_addr, uint8_t ep_num, uint8_t ep_dir) {
-  const uint8_t max_channel = dwc2_channel_count(dwc2);
-  for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    if (_hcd_data.xfer[ch_id].allocated) {
-      const dwc2_channel_char_t hcchar = {.value = dwc2->channel[ch_id].hcchar};
-      if (hcchar.dev_addr == dev_addr && hcchar.ep_num == ep_num && (ep_num == 0 || hcchar.ep_dir == ep_dir)) {
-        return ch_id;
-      }
-    }
-  }
-  return TUSB_INDEX_INVALID_8;
+static void hcd_xhci_set_configuration(void) {
+  xhci_update_slot_context(&xhci_handle);
+  xhci_init_endpoint_context(&xhci_handle, BULK_OUT);
+  xhci_init_endpoint_context(&xhci_handle, BULK_IN);
+  xhci_configure_endpoint(&xhci_handle);
+  (void) wait_for_command_completion_event(&xhci_handle, CONFIGURE_ENDPOINT_CMD);
 }
 
+// Align EP0 max packet size of the input context with the device descriptor (Evaluate Context).
+// TODO: not called yet; usbh has no hook after reading the device descriptor.
+TU_ATTR_UNUSED static bool hcd_evaluate_xhci_context(void) {
+  tusb_desc_device_t usb_desc;
+  TU_ASSERT(tuh_descriptor_get_device_local(device_addr, &usb_desc));
+  const uint16_t ep0_pkt_size =
+    (uint16_t) ((xhci_handle.ip_ctx->xe_context[0].xec_info & ~EP_CTX_MAX_PKT_SIZE_MSK) >> EP_CTX_MAX_PKT_SIZE_POS);
+  // USB3 encodes bMaxPacketSize0 as an exponent of 2
+  const uint16_t desc_max_pkt_size = (usb_desc.bcdUSB >= 0x300U) ? (uint16_t) (1U << usb_desc.bMaxPacketSize0)
+                                                                  : usb_desc.bMaxPacketSize0;
 
-// Allocate a new endpoint
-TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_alloc(void) {
-  for (uint32_t i = 0; i < CFG_TUH_DWC2_ENDPOINT_MAX; i++) {
-    hcd_endpoint_t* edpt = &_hcd_data.edpt[i];
-    if (edpt->hcchar_bm.enable == 0) {
-      tu_memclr(edpt, sizeof(hcd_endpoint_t));
-      edpt->hcchar_bm.enable = 1;
-      return i;
-    }
+  if (ep0_pkt_size != desc_max_pkt_size) {
+    xhci_update_endpoint_packetsize(xhci_handle.ip_ctx, desc_max_pkt_size);
+    xhci_evaluate_endpoint(&xhci_handle);
+    TU_VERIFY(wait_for_command_completion_event(&xhci_handle, EVALUATE_CONTEXT_CMD) == 0);
   }
-  return TUSB_INDEX_INVALID_8;
+
+  return true;
 }
 
-// Find a endpoint that is opened previously with hcd_edpt_open()
-// Note: EP0 is bidirectional
-TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_find_opened(uint8_t dev_addr, uint8_t ep_num, uint8_t ep_dir) {
-  for (uint8_t i = 0; i < (uint8_t)CFG_TUH_DWC2_ENDPOINT_MAX; i++) {
-    const dwc2_channel_char_t* hcchar_bm = &_hcd_data.edpt[i].hcchar_bm;
-    if (hcchar_bm->enable && hcchar_bm->dev_addr == dev_addr &&
-        hcchar_bm->ep_num == ep_num && (ep_num == 0 || hcchar_bm->ep_dir == ep_dir)) {
-      return i;
-    }
+// Find the endpoint private data (transfer ring) for an endpoint address
+static struct ep_priv* ep_priv_find(uint8_t ep_addr) {
+  if (tu_edpt_number(ep_addr) == 0) {
+    return &xhci_handle.ep0;
   }
-  return TUSB_INDEX_INVALID_8;
+  if (xhci_handle.msc_eps.ep_in.ep_addr == ep_addr) {
+    return &xhci_handle.msc_eps.ep_in;
+  }
+  if (xhci_handle.msc_eps.ep_out.ep_addr == ep_addr) {
+    return &xhci_handle.msc_eps.ep_out;
+  }
+  return NULL;
 }
 
-TU_ATTR_ALWAYS_INLINE static inline uint16_t cal_packet_count(uint16_t len, uint16_t ep_size) {
-  if (len == 0) {
-    return 1;
-  } else {
-    return tu_div_ceil(len, ep_size);
+static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr) {
+  uint8_t* buffer = ep_data[ep_dci].buffer;
+  uint32_t buflen = ep_data[ep_dci].buflen;
+
+  if ((tu_edpt_number(ep_addr) == 0 && buflen != 0) || tu_edpt_dir(ep_addr) == TUSB_DIR_IN) {
+    dwc3_dcache_invalidate(buffer, buflen);
   }
-}
-
-TU_ATTR_ALWAYS_INLINE static inline uint8_t cal_next_pid(uint8_t pid, uint8_t packet_count) {
-  if (packet_count & 0x01) {
-    return pid ^ 0x02; // toggle DATA0 and DATA1
-  } else {
-    return pid;
-  }
-}
-
-//--------------------------------------------------------------------
-//
-//--------------------------------------------------------------------
-
-/* USB Data FIFO Layout
-
-  The FIFO is split up into
-  - EPInfo: for storing DMA metadata (check dcd_dwc2.c for more details)
-  - 1 RX FIFO: for receiving data
-  - 1 TX FIFO for non-periodic (NPTX)
-  - 1 TX FIFO for periodic (PTX)
-
-  We allocated TX FIFO from top to bottom (using top pointer), this to allow the RX FIFO to grow dynamically which is
-  possible since the free space is located between the RX and TX FIFOs.
-
-   ----------------- ep_fifo_size
-  |    HCDMAn    |
-  |--------------|-- gdfifocfg.EPINFOBASE (max is ghwcfg3.dfifo_depth)
-  | Non-Periodic |
-  |   TX FIFO    |
-  |--------------|--- GNPTXFSIZ.addr (fixed size)
-  |   Periodic   |
-  |   TX FIFO    |
-  |--------------|--- HPTXFSIZ.addr (expandable downward)
-  |    FREE      |
-  |              |
-  |--------------|-- GRXFSIZ (expandable upward)
-  |  RX FIFO     |
-  ---------------- 0
-*/
-
-/* Programming Guide 2.1.2 FIFO RAM allocation
- * RX
- * - Largest-EPsize/4 + 2 (status info). recommended x2 if high bandwidth or multiple ISO are used.
- * - 2 for transfer complete and channel halted status
- * - 1 for each Control/Bulk out endpoint to Handle NAK/NYET (i.e max is number of host channel)
- *
- * TX non-periodic (NPTX)
- * - At least largest-EPsize/4, recommended x2
- *
- * TX periodic (PTX)
- * - At least largest-EPsize*MulCount/4 (MulCount up to 3 for high-bandwidth ISO/interrupt)
-*/
-static void dfifo_host_init(uint8_t rhport) {
-  const dwc2_controller_t* dwc2_controller = &_dwc2_controller[rhport];
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const dwc2_ghwcfg2_t ghwcfg2 = {.value = dwc2->ghwcfg2};
-
-  // Scatter/Gather DMA mode is not yet supported. Buffer DMA only need 1 words per channel
-  const bool is_dma = dma_host_enabled(dwc2);
-  uint16_t dfifo_top = dwc2_controller->ep_fifo_size/4;
-  if (is_dma) {
-    dfifo_top -= ghwcfg2.num_host_ch;
-  }
-
-  // fixed allocation for now, improve later:
-    // - ptx_largest is limited to 256 for FS since most FS core only has 1024 bytes total
-  bool is_highspeed = dwc2_core_is_highspeed(dwc2, TUSB_ROLE_HOST);
-  uint32_t nptx_largest = is_highspeed ? TUSB_EPSIZE_BULK_HS/4 : TUSB_EPSIZE_BULK_FS/4;
-  uint32_t ptx_largest = is_highspeed ? TUSB_EPSIZE_ISO_HS_MAX/4 : 256/4;
-
-  uint16_t nptxfsiz = 2 * nptx_largest;
-  uint16_t rxfsiz = 2 * (ptx_largest + 2) + ghwcfg2.num_host_ch;
-  TU_ASSERT(dfifo_top >= (nptxfsiz + rxfsiz),);
-  uint16_t ptxfsiz = dfifo_top - (nptxfsiz + rxfsiz);
-
-  dwc2->gdfifocfg = (dfifo_top << GDFIFOCFG_EPINFOBASE_SHIFT) | dfifo_top;
-
-  dfifo_top -= rxfsiz;
-  dwc2->grxfsiz = rxfsiz;
-
-  dfifo_top -= nptxfsiz;
-  dwc2->gnptxfsiz = tu_u32_from_u16(nptxfsiz, dfifo_top);
-
-  dfifo_top -= ptxfsiz;
-  dwc2->hptxfsiz = tu_u32_from_u16(ptxfsiz, dfifo_top);
 }
 
 //--------------------------------------------------------------------+
 // Controller API
 //--------------------------------------------------------------------+
 
-// optional hcd configuration, called by tuh_configure()
-bool hcd_configure(uint8_t rhport, uint32_t cfg_id, const void* cfg_param) {
-  (void) rhport;
-  (void) cfg_id;
-  (void) cfg_param;
-
-  return true;
-}
-
-// Initialize controller to host mode
+// Initialize controller to host mode. The whole controller is brought up on the SS rhport.
 bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   (void) rh_init;
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
 
-  tu_memclr(&_hcd_data, sizeof(_hcd_data));
-
-  // Core Initialization
-  const bool is_highspeed = dwc2_core_is_highspeed(dwc2, TUSB_ROLE_HOST);
-  const bool is_dma = dma_host_enabled(dwc2);
-  TU_ASSERT(dwc2_core_init(rhport, is_highspeed, is_dma));
-
-  //------------- 3.1 Host Initialization -------------//
-
-  // work at max supported speed
-  dwc2->hcfg &= ~HCFG_FSLS_ONLY;
-
-  // Enable HFIR reload
-  if (dwc2->gsnpsid >= DWC2_CORE_REV_2_92a) {
-    dwc2->hfir |= HFIR_RELOAD_CTRL;
+  if (rhport != DWC3_RHPORT_SS) {
+    return true;
   }
 
-  // force host mode and wait for mode switch
-  dwc2->gusbcfg = (dwc2->gusbcfg & ~GUSBCFG_FDMOD) | GUSBCFG_FHMOD;
-#if CFG_TUSB_MCU == OPT_MCU_STM32N6
-  // No hardware detection of Vbus B-session is available on the STM32N6
-  dwc2->stm32_gccfg &= ~STM32_GCCFG_VBVALOVAL;
-#endif
-  while ((dwc2->gintsts & GINTSTS_CMOD) != GINTSTS_CMODE_HOST) {}
+  TU_ASSERT(dwc3_mcu_init(rhport));
 
-  // configure fixed-allocated fifo scheme
-  dfifo_host_init(rhport);
+  if (!cmd_queue_init()) {
+    ERROR("Error in creating xHCI command queue");
+    return false;
+  }
 
-  dwc2->hprt = HPRT_W1_MASK; // clear all write-1-clear bits
-  dwc2->hprt = HPRT_POWER; // turn on VBUS
+  int ret = dwc3_init();
+  if (ret != 0) {
+    ERROR("dwc3 Error -%d!!!", ret);
+    return false;
+  }
 
-  // Enable required interrupts
-  dwc2->gintmsk |= GINTSTS_OTGINT | GINTSTS_CONIDSTSCHNG | GINTSTS_HPRTINT | GINTSTS_HCINT | GINTSTS_DISCINT;
+  tu_memclr(&xhci_handle, sizeof(xhci_handle));
 
-  // NPTX can hold at least 2 packet, change interrupt level to half-empty
-  uint32_t gahbcfg = dwc2->gahbcfg & ~GAHBCFG_TX_FIFO_EPMTY_LVL;
-  gahbcfg |= GAHBCFG_GINT;   // Enable global interrupt
-  dwc2->gahbcfg = gahbcfg;
+  if (!xhci_init(&xhci_handle)) {
+    ERROR("xHCI init failed !!!");
+    return false;
+  }
 
   return true;
 }
 
-// Enable USB interrupt
-void hcd_int_enable (uint8_t rhport) {
-  dwc2_int_set(rhport, TUSB_ROLE_HOST, true);
+// Interrupts are owned by the HS rhport
+void hcd_int_enable(uint8_t rhport) {
+  if (rhport == DWC3_RHPORT_HS) {
+    enable_xhci_interrupts();
+    (void) dwc3_int_set(rhport, true);
+  }
 }
 
-// Disable USB interrupt
 void hcd_int_disable(uint8_t rhport) {
-  dwc2_int_set(rhport, TUSB_ROLE_HOST, false);
+  if (rhport == DWC3_RHPORT_HS) {
+    (void) dwc3_int_set(rhport, false);
+  }
 }
 
-// Get frame number (1ms)
+// Get frame number (1ms): MFINDEX counts 125us micro-frames
 uint32_t hcd_frame_number(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  return dwc2->hfnum & HFNUM_FRNUM_Msk;
+  (void) rhport;
+  return xhci_get_mfindex() >> 3;
 }
 
 //--------------------------------------------------------------------+
 // Port API
 //--------------------------------------------------------------------+
 
-// Get the current connect status of roothub port
+// PORTSC.CCS of the root-hub port
 bool hcd_port_connect_status(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  return dwc2->hprt & HPRT_CONN_STATUS;
+  return xhci_port_status(rhport);
 }
 
-// Reset USB bus on the port. Return immediately, bus reset sequence may not be complete.
-// Some port would require hcd_port_reset_end() to be invoked after 10ms to complete the reset sequence.
 void hcd_port_reset(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  uint32_t hprt = dwc2->hprt & ~HPRT_W1_MASK;
-  hprt |= HPRT_RESET;
-  dwc2->hprt = hprt;
+  reset_usb_port(rhport);
 }
 
-// Complete bus reset sequence, may be required by some controllers
+// Completes the reset, then enables a slot and addresses the device (xHCI assigns the address)
 void hcd_port_reset_end(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  uint32_t hprt = dwc2->hprt & ~HPRT_W1_MASK; // skip w1c bits
-  hprt &= ~HPRT_RESET;
-  dwc2->hprt = hprt;
+  TU_ASSERT(usb_port_reset_end(rhport), );
+  TU_ASSERT(hcd_enable_slot(), );
+  TU_ASSERT(hcd_send_address_cmd(), );
 }
 
-// Get port link speed
 tusb_speed_t hcd_port_speed_get(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const tusb_speed_t speed = hprt_speed_get(dwc2);
-  return speed;
+  switch (xhci_get_port_speed(rhport)) {
+    case 4: return TUSB_SPEED_SS;
+    case 3: return TUSB_SPEED_HIGH;
+    case 2: return TUSB_SPEED_FULL;
+    case 1: return TUSB_SPEED_LOW;
+    default: return TUSB_SPEED_INVALID;
+  }
 }
 
-// HCD closes all opened endpoints belong to this device
+// Release the slot of the (single) device. usbh also closes the default address 0 during enumeration;
+// that must not tear down the slot that is being enumerated.
 void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
-  (void) rhport;
-  for (uint8_t i = 0; i < (uint8_t) CFG_TUH_DWC2_ENDPOINT_MAX; i++) {
-    hcd_endpoint_t* edpt = &_hcd_data.edpt[i];
-    if (edpt->hcchar_bm.enable && edpt->hcchar_bm.dev_addr == dev_addr) {
-      tu_memclr(edpt, sizeof(hcd_endpoint_t));
+  if (dev_addr == 0 || dev_addr != device_addr) {
+    return;
+  }
+
+  if (rhport == DWC3_RHPORT_SS) {
+    xhci_warm_reset(rhport); // warm reset for usb3 ports only
+  }
+
+  const uint32_t slotid = xhci_handle.dev_data.slot_id;
+  if (slotid != 0U) {
+    xhci_disable_slot_command(xhci_handle.xcr_ring, slotid);
+
+    if (wait_for_command_completion_event(&xhci_handle, DISABLE_SLOT_CMD) != 0) {
+      ERROR("xHCI command failed");
+      return;
     }
+
+    deallocate_xhci_context(&xhci_handle);
+    device_addr = 0U;
+    usb_set_config = 0;
   }
 }
 
@@ -469,966 +318,228 @@ void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
 // Endpoints API
 //--------------------------------------------------------------------+
 
-// Open an endpoint
-bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, const tusb_desc_endpoint_t* desc_ep) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const tusb_speed_t rh_speed = hprt_speed_get(dwc2);
-
-  tuh_bus_info_t bus_info;
-  tuh_bus_info_get(dev_addr, &bus_info);
-
-  // find a free endpoint
-  const uint8_t ep_id = edpt_alloc();
-  TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[ep_id];
-
-  dwc2_channel_char_t* hcchar_bm = &edpt->hcchar_bm;
-  hcchar_bm->ep_size         = tu_edpt_packet_size(desc_ep);
-  hcchar_bm->ep_num          = tu_edpt_number(desc_ep->bEndpointAddress);
-  hcchar_bm->ep_dir          = tu_edpt_dir(desc_ep->bEndpointAddress);
-  hcchar_bm->low_speed_dev   = (bus_info.speed == TUSB_SPEED_LOW) ? 1 : 0;
-  hcchar_bm->ep_type         = desc_ep->bmAttributes.xfer; // ep_type matches TUSB_XFER_*
-  hcchar_bm->err_multi_count = 0;
-  hcchar_bm->dev_addr        = dev_addr;
-  hcchar_bm->odd_frame       = 0;
-  hcchar_bm->disable         = 0;
-  hcchar_bm->enable          = 1;
-
-  dwc2_channel_split_t* hcsplt_bm = &edpt->hcsplt_bm;
-  hcsplt_bm->hub_port        = bus_info.hub_port;
-  hcsplt_bm->hub_addr        = bus_info.hub_addr;
-  hcsplt_bm->xact_pos        = 0;
-  hcsplt_bm->split_compl     = 0;
-  hcsplt_bm->split_en        = (rh_speed == TUSB_SPEED_HIGH && bus_info.speed != TUSB_SPEED_HIGH) ? 1 : 0;
-
-  edpt->speed = bus_info.speed;
-  edpt->next_pid = HCTSIZ_PID_DATA0;
-  if (desc_ep->bmAttributes.xfer == TUSB_XFER_ISOCHRONOUS) {
-    edpt->uframe_interval = 1 << (desc_ep->bInterval - 1);
-    if (bus_info.speed == TUSB_SPEED_FULL) {
-      edpt->uframe_interval <<= 3;
-    }
-  } else if (desc_ep->bmAttributes.xfer == TUSB_XFER_INTERRUPT) {
-    if (bus_info.speed == TUSB_SPEED_HIGH) {
-      edpt->uframe_interval = 1 << (desc_ep->bInterval - 1);
-    } else {
-      edpt->uframe_interval = desc_ep->bInterval << 3;
-    }
-  }
-
+// Endpoint contexts are configured from the full configuration descriptor, see
+// hcd_parse_full_conf_descriptor(), so there is nothing to do per endpoint here
+bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, const tusb_desc_endpoint_t* ep_desc) {
+  (void) rhport;
+  (void) dev_addr;
+  (void) ep_desc;
   return true;
 }
 
-bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr) {
-  (void) rhport; (void) daddr; (void) ep_addr;
-  return false; // TODO not implemented yet
+// Not supported: dropping a single endpoint needs a Configure Endpoint command with drop flags,
+// which the xHCI library does not implement yet. Endpoints are released by hcd_device_close().
+bool hcd_edpt_close(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+  (void) rhport;
+  (void) dev_addr;
+  (void) ep_addr;
+  return false;
 }
 
-// clean up channel after part of transfer is done but the whole urb is not complete
-static void channel_xfer_out_wrapup(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  const dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-
-  const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
-  edpt->next_pid = hctsiz.pid; // save PID
-
-  /* Since hctsiz.xfersize field reflects the number of bytes transferred via the AHB, not the USB)
-   * For IN: we can use hctsiz.xfersize as remaining bytes.
-   * For OUT: Must use the hctsiz.pktcnt field to determine how much data has been transferred. This field reflects the
-   * number of packets that have been transferred via the USB. This is always an integral number of packets if the
-   * transfer was halted before its normal completion.
-   */
-  const uint16_t remain_packets = hctsiz.packet_count;
-  const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-  const uint16_t total_packets = cal_packet_count(edpt->buflen, hcchar.ep_size);
-  const uint16_t actual_bytes = (total_packets - remain_packets) * hcchar.ep_size;
-
-  xfer->fifo_bytes = 0;
-  xfer->xferred_bytes += actual_bytes;
-  edpt->buffer += actual_bytes;
-  edpt->buflen -= actual_bytes;
-}
-
-static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  dwc2_channel_char_t* hcchar_bm = &edpt->hcchar_bm;
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  bool const is_period = channel_is_periodic(edpt->hcchar);
-
-  // clear previous state
-  xfer->fifo_bytes = 0;
-
-  // hchar: restore but don't enable yet
-  if (is_period) {
-    hcchar_bm->odd_frame = 1 - (dwc2->hfnum & 1);   // transfer on next frame
-  }
-  channel->hcchar = (edpt->hcchar & ~HCCHAR_CHENA);
-
-  // hctsiz: zero length packet still count as 1
-  const uint16_t packet_count = cal_packet_count(edpt->buflen, hcchar_bm->ep_size);
-  dwc2_channel_tsize_t hctsiz = {.value = 0};
-  hctsiz.pid = edpt->next_pid; // next PID is set in transfer complete interrupt
-  hctsiz.packet_count = packet_count;
-  hctsiz.xfer_size = edpt->buflen;
-  if (edpt->next_do_ping && edpt->speed == TUSB_SPEED_HIGH &&
-     edpt->next_pid != HCTSIZ_PID_SETUP && hcchar_bm->ep_dir == TUSB_DIR_OUT) {
-    hctsiz.do_ping = 1;
-  }
-  channel->hctsiz = hctsiz.value;
-  edpt->next_do_ping = 0;
-
-  // pre-calculate next PID based on packet count, adjusted in transfer complete interrupt if short packet
-  if (hcchar_bm->ep_num == 0) {
-    edpt->next_pid = HCTSIZ_PID_DATA1; // control data and status stage always start with DATA1
-  } else {
-    edpt->next_pid = cal_next_pid(edpt->next_pid, packet_count);
-  }
-
-  channel->hcsplt = edpt->hcsplt;
-  channel->hcint = 0xFFFFFFFFU; // clear all channel interrupts
-
-  if (dma_host_enabled(dwc2)) {
-    uint32_t hcintmsk = HCINT_HALTED;
-    channel->hcintmsk = hcintmsk;
-    dwc2->haintmsk |= TU_BIT(ch_id);
-
-    channel->hcdma = (uint32_t) edpt->buffer;
-
-    if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
-      channel_send_in_token(dwc2, channel);
-    } else {
-      hcd_dcache_clean(edpt->buffer, edpt->buflen);
-      channel->hcchar |= HCCHAR_CHENA;
-    }
-  } else {
-    uint32_t hcintmsk = HCINT_NAK | HCINT_XACT_ERR | HCINT_STALL | HCINT_XFER_COMPLETE | HCINT_DATATOGGLE_ERR;
-    if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
-      hcintmsk |= HCINT_BABBLE_ERR | HCINT_DATATOGGLE_ERR | HCINT_ACK;
-    } else {
-      hcintmsk |= HCINT_NYET;
-      if (edpt->hcsplt_bm.split_en || hctsiz.do_ping) {
-        hcintmsk |= HCINT_ACK;
-      }
-    }
-    channel->hcintmsk = hcintmsk;
-    dwc2->haintmsk |= TU_BIT(ch_id);
-
-    // enable channel for slave mode:
-    // - OUT: it will enable corresponding FIFO channel
-    // - IN : it will write an IN request to the Non-periodic Request Queue, this will have dwc2 trying to send
-    // IN Token. If we got NAK, we have to re-enable the channel again in the interrupt. Due to the way usbh stack only
-    // call hcd_edpt_xfer() once, we will need to manage de-allocate/re-allocate IN channel dynamically.
-    if (hcchar_bm->ep_dir == TUSB_DIR_IN) {
-      channel_send_in_token(dwc2, channel);
-    } else {
-      channel->hcchar |= HCCHAR_CHENA;
-      if (edpt->buflen > 0) {
-        // To prevent conflict with other channel, we will enable periodic/non-periodic FIFO empty interrupt accordingly
-        // And write packet in the interrupt handler
-        dwc2->gintmsk |= (is_period ? GINTSTS_PTX_FIFO_EMPTY : GINTSTS_NPTX_FIFO_EMPTY);
-      }
-    }
-  }
-
-  return true;
-}
-
-// kick-off transfer with an endpoint
-static bool edpt_xfer_kickoff(dwc2_regs_t* dwc2, uint8_t ep_id) {
-  uint8_t ch_id = channel_alloc(dwc2);
-  TU_ASSERT(ch_id < 16); // all channel are in used
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  xfer->ep_id = ep_id;
-  xfer->result = XFER_RESULT_INVALID;
-
-  return channel_xfer_start(dwc2, ch_id);
-}
-
-// Submit a transfer, when complete hcd_event_xfer_complete() must be invoked
-bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t buflen) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const uint8_t ep_num = tu_edpt_number(ep_addr);
-  const uint8_t ep_dir = tu_edpt_dir(ep_addr);
-
-  uint8_t ep_id = edpt_find_opened(dev_addr, ep_num, ep_dir);
-  TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[ep_id];
-
-  edpt->buffer = buffer;
-  edpt->buflen = buflen;
-
-  if (ep_num == 0) {
-    // update ep_dir since control endpoint can switch direction
-    edpt->hcchar_bm.ep_dir = ep_dir;
-  }
-
-  return edpt_xfer_kickoff(dwc2, ep_id);
-}
-
-// Abort a queued transfer. Note: it can only abort transfer that has not been started
-// Return true if a queued transfer is aborted, false if there is no transfer to abort
-bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const uint8_t ep_num = tu_edpt_number(ep_addr);
-  const uint8_t ep_dir = tu_edpt_dir(ep_addr);
-  const uint8_t ep_id = edpt_find_opened(dev_addr, ep_num, ep_dir);
-  TU_VERIFY(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-
-  // hcd_int_disable(rhport);
-
-  // Find enabled channeled and disable it, channel will be de-allocated in the interrupt handler
-  const uint8_t ch_id = channel_find_enabled(dwc2, dev_addr, ep_num, ep_dir);
-  if (ch_id < 16) {
-    dwc2_channel_t* channel = &dwc2->channel[ch_id];
-    channel_disable(dwc2, channel);
-  }
-
-  // hcd_int_enable(rhport);
-
-  return true;
-}
-
-// Submit a special transfer to send 8-byte Setup Packet, when complete hcd_event_xfer_complete() must be invoked
 bool hcd_setup_send(uint8_t rhport, uint8_t dev_addr, const uint8_t setup_packet[8]) {
-  uint8_t ep_id = edpt_find_opened(dev_addr, 0, TUSB_DIR_OUT);
-  TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX); // no opened endpoint
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[ep_id];
-  edpt->next_pid = HCTSIZ_PID_SETUP;
+  (void) rhport;
+  memcpy(&ctrl_req, setup_packet, sizeof(ctrl_req));
 
-  return hcd_edpt_xfer(rhport, dev_addr, 0, (uint8_t*)(uintptr_t) setup_packet, 8);
+  if ((tusb_request_code_t) setup_packet[1] == TUSB_REQ_SET_CONFIGURATION) {
+    hcd_xhci_set_configuration();
+    usb_set_config = 1;
+  }
+
+  if ((tusb_request_code_t) setup_packet[1] == TUSB_REQ_SET_ADDRESS) {
+    device_addr = (uint8_t) ctrl_req.wValue;
+  }
+
+  // xHCI sends setup + data + status as one TD, the data stage is queued by hcd_edpt_xfer()
+  hcd_event_xfer_complete(dev_addr, 0, 8, XFER_RESULT_SUCCESS, true);
+  return true;
 }
 
-// clear stall, data toggle is also reset to DATA0
-bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t* buffer, uint32_t buflen) {
   (void) rhport;
   const uint8_t ep_num = tu_edpt_number(ep_addr);
-  const uint8_t ep_dir = tu_edpt_dir(ep_addr);
-  const uint8_t ep_id = edpt_find_opened(dev_addr, ep_num, ep_dir);
-  TU_VERIFY(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[ep_id];
+  const uint8_t dir = (uint8_t) tu_edpt_dir(ep_addr);
+  const uint8_t ep_dci = xhci_get_ep_dci(ep_addr);
 
-  edpt->next_pid = HCTSIZ_PID_DATA0;
+  // There is no separate status stage for the xHCI controller: complete it immediately
+  if (buffer == NULL && buflen == 0 && usb_set_config == 0) {
+    hcd_event_xfer_complete(dev_addr, ep_num, 8, XFER_RESULT_SUCCESS, true);
+    return true;
+  }
+
+  TU_ASSERT(ep_dci < XHCI_DCI_MAX);
+  ep_data[ep_dci].buffer = buffer;
+  ep_data[ep_dci].buflen = buflen;
+
+  if (ep_num == 0) {
+    xhci_configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t*) &ctrl_req);
+    ring_xhci_ep0_db(&xhci_handle.op_regs);
+  } else {
+    if (dir == TUSB_DIR_OUT) {
+      dwc3_dcache_clean(buffer, buflen);
+    }
+    xhci_endpoint_transfer(&xhci_handle, (int) ep_num, dir, buffer, buflen);
+  }
 
   return true;
 }
 
-//--------------------------------------------------------------------
-// HCD Event Handler
-//--------------------------------------------------------------------
-
-// retry an IN transfer, channel must be halted
-static void channel_xfer_in_retry(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-
-  if (channel_is_periodic(hcchar.value)){
-    const dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
-    // retry immediately for periodic split NYET if we haven't reach max retry
-    if (hcsplt.split_en && hcsplt.split_compl && (hcint & HCINT_NYET || xfer->halted_nyet)) {
-      xfer->period_split_nyet_count++;
-      xfer->halted_nyet = 0;
-      if (xfer->period_split_nyet_count < HCD_XFER_PERIOD_SPLIT_NYET_MAX) {
-        hcchar.odd_frame = 1 - (dwc2->hfnum & 1); // transfer on next frame
-        channel->hcchar = hcchar.value;
-        channel_send_in_token(dwc2, channel);
-        return;
-      } else {
-        // too many NYET, de-allocate channel with below code
-        xfer->period_split_nyet_count = 0;
-      }
-    }
-
-    const uint32_t ucount = (hprt_speed_get(dwc2) == TUSB_SPEED_HIGH ? 1 : 8);
-    if (edpt->uframe_interval == ucount) {
-      // retry on next frame if bInterval is 1
-      hcchar.odd_frame = 1 - (dwc2->hfnum & 1);
-      channel->hcchar = hcchar.value;
-      channel_send_in_token(dwc2, channel);
-    } else {
-      // otherwise, de-allocate channel, enable SOF set frame counter for later transfer
-      const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
-      edpt->next_pid = hctsiz.pid; // save PID
-      edpt->uframe_countdown = edpt->uframe_interval - ucount;
-      // enable SOF interrupt if not already enabled
-      if (!(dwc2->gintmsk & GINTMSK_SOFM)) {
-        dwc2->gintsts = GINTSTS_SOF;
-        dwc2->gintmsk |= GINTMSK_SOFM;
-      }
-      // already halted, de-allocate channel (called from DMA isr)
-      channel_dealloc(dwc2, ch_id);
-    }
-  } else {
-    // for control/bulk: retry immediately
-    channel_send_in_token(dwc2, channel);
-  }
+// Not supported: aborting needs Stop Endpoint + Set TR Dequeue on the endpoint ring
+bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+  (void) rhport;
+  (void) dev_addr;
+  (void) ep_addr;
+  return false;
 }
 
-#if CFG_TUSB_DEBUG
-TU_ATTR_ALWAYS_INLINE static inline void print_hcint(uint32_t hcint) {
-  const char* str[] = {
-    "XFRC", "HALTED", "AHBERR", "STALL",
-    "NAK", "ACK", "NYET", "XERR",
-    "BBLERR", "FRMOR", "DTERR", "BNA",
-    "XCSERR", "DESC_LST"
-  };
+// Clear the Halted state after a STALL: Reset Endpoint (also resets the sequence number),
+// then point the dequeue pointer at the current enqueue pointer to skip the stalled TD.
+bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+  (void) rhport;
+  (void) dev_addr;
 
-  for(uint32_t i=0; i<14; i++) {
-    if (hcint & TU_BIT(i)) {
-      TU_LOG1("%s ", str[i]);
-    }
-  }
-  TU_LOG1("\r\n");
-}
-#endif
+  struct ep_priv* ep = ep_priv_find(ep_addr);
+  TU_VERIFY(ep != NULL && ep->ep_tr_enq_ptr != NULL);
 
-#if CFG_TUH_DWC2_SLAVE_ENABLE
-static void handle_rxflvl_irq(uint8_t rhport) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
+  const uint8_t slot_id = xhci_handle.dev_data.slot_id;
+  const uint8_t dci = xhci_get_ep_dci(ep_addr);
 
-  // Pop control word off FIFO
-  const dwc2_grxstsp_t grxstsp = {.value= dwc2->grxstsp};
-  const uint8_t ch_id = grxstsp.ep_ch_num;
+  xhci_reset_endpoint_command(xhci_handle.xcr_ring, slot_id, dci);
+  TU_VERIFY(wait_for_command_completion_event(&xhci_handle, RESET_ENDPOINT_CMD) == 0);
 
-  switch (grxstsp.packet_status) {
-    case GRXSTS_PKTSTS_RX_DATA: {
-      // In packet received, pop this entry --> ACK interrupt
-      const uint16_t byte_count = grxstsp.byte_count;
-      hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-      TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX,);
-      hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
+  xhci_set_tr_dequeue_command(xhci_handle.xcr_ring, slot_id, dci, ep->ep_tr_enq_ptr, ep->pcs_flag);
+  TU_VERIFY(wait_for_command_completion_event(&xhci_handle, SET_TR_DEQUEUE_PTR_CMD) == 0);
 
-      if (byte_count) {
-        dfifo_read_packet(dwc2, edpt->buffer + xfer->xferred_bytes, byte_count);
-        xfer->xferred_bytes += byte_count;
-        xfer->fifo_bytes = byte_count;
-      }
-      break;
-    }
-
-    case GRXSTS_PKTSTS_RX_COMPLETE:
-      // In transfer complete: After this entry is popped from the rx FIFO, dwc2 asserts a Transfer Completed
-      // interrupt --> handle_channel_irq()
-      break;
-
-    case GRXSTS_PKTSTS_HOST_DATATOGGLE_ERR:
-      TU_ASSERT(0, ); // maybe try to change DToggle
-      break;
-
-    case GRXSTS_PKTSTS_HOST_CHANNEL_HALTED:
-      // triggered when channel.hcchar_bm.disable is set
-      // TODO handle later
-      break;
-
-    default: break; // ignore other status
-  }
+  return true;
 }
 
-// return true if there is still pending data and need more ISR
-static bool handle_txfifo_empty(dwc2_regs_t* dwc2, bool is_periodic) {
-  // Use period txsts for both p/np to get request queue space available (1-bit difference, it is small enough)
-  const dwc2_hptxsts_t txsts = {.value = (is_periodic ? dwc2->hptxsts : dwc2->hnptxsts)};
+// Configure the endpoint contexts from the full configuration descriptor (optional HCD op).
+bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t* desc_cfg, uint8_t rhport) {
+  (void) rhport;
+  const uint8_t usb_speed = xhci_handle.dev_data.dev_speed;
 
-  const uint8_t max_channel = dwc2_channel_count(dwc2);
-  for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    dwc2_channel_t* channel = &dwc2->channel[ch_id];
-    const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-    // skip writing to FIFO if channel is expecting halted.
-    if (!(channel->hcintmsk & HCINT_HALTED) && (hcchar.ep_dir == TUSB_DIR_OUT)) {
-      hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-      TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-      hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-      const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
-      const uint16_t remain_packets = hctsiz.packet_count;
-      for (uint16_t i = 0; i < remain_packets; i++) {
-        const uint16_t remain_bytes = edpt->buflen - xfer->fifo_bytes;
-        const uint16_t xact_bytes = tu_min16(remain_bytes, hcchar.ep_size);
+  uint16_t const total_len = tu_le16toh(desc_cfg->wTotalLength);
+  uint8_t const* desc_end = ((uint8_t const*) desc_cfg) + total_len;
+  uint8_t const* p_desc = tu_desc_next(desc_cfg);
+  uint8_t assoc_itf_count = 1;
+  uint32_t err_flag = 0U;
 
-        // skip if there is not enough space in FIFO and RequestQueue.
-        // Packet's last word written to FIFO will trigger a request queue
-        if ((xact_bytes > (txsts.fifo_available << 2)) || (txsts.req_queue_available == 0)) {
-          return true;
-        }
+  usb_endpoint_descriptor_t xhci_ep_desc;
 
-        dfifo_write_packet(dwc2, ch_id, edpt->buffer + xfer->fifo_bytes, xact_bytes);
-        xfer->fifo_bytes += xact_bytes;
-      }
+  DEBUG("Parsing Complete Configuration Descriptors");
+
+  while (p_desc < desc_end) {
+    TU_ASSERT(TUSB_DESC_INTERFACE == tu_desc_type(p_desc));
+
+    tusb_desc_interface_t const* desc_itf = (tusb_desc_interface_t const*) (uintptr_t) p_desc;
+
+    // Only MSC is supported for now
+    if (desc_itf->bInterfaceClass != TUSB_CLASS_MSC) {
+      PRINT("Device does not support MSC");
+      PRINT("Enumeration process completed");
+      return false;
     }
+
+    uint16_t const drv_len =
+      tu_desc_get_interface_total_len(desc_itf, assoc_itf_count, (uint16_t) (desc_end - p_desc));
+
+    tusb_desc_endpoint_t const* ep_desc = (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(desc_itf);
+
+    for (int i = 0; i < 2; i++) {
+      TU_ASSERT(TUSB_DESC_ENDPOINT == ep_desc->bDescriptorType && TUSB_XFER_BULK == ep_desc->bmAttributes.xfer);
+
+      xhci_ep_desc.bLength = ep_desc->bLength;
+      xhci_ep_desc.bDescriptorType = ep_desc->bDescriptorType;
+      xhci_ep_desc.bEndpointAddress = ep_desc->bEndpointAddress;
+      (void) memcpy(&xhci_ep_desc.bmAttributes, &ep_desc->bmAttributes, sizeof(xhci_ep_desc.bmAttributes));
+      xhci_ep_desc.wMaxPacketSize = ep_desc->wMaxPacketSize;
+      xhci_ep_desc.bInterval = ep_desc->bInterval;
+
+      ep_desc = (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(ep_desc);
+      if (usb_speed == XHCI_SPEED_SS) {
+        // skip the SuperSpeed endpoint companion descriptor
+        ep_desc = (tusb_desc_endpoint_t const*) (uintptr_t) tu_desc_next(ep_desc);
+      }
+
+      if (xhci_parse_endpoint_descriptor(&xhci_handle, &xhci_ep_desc) != 0) {
+        ERROR("Failed to parse endpoint descriptor");
+        return false;
+      }
+      err_flag = 1U;
+    }
+
+    p_desc += drv_len;
   }
 
-  return false; // no channel has pending data
+  return err_flag != 0U;
 }
 
-static bool handle_channel_in_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
-  const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
-  bool is_done = false;
+//--------------------------------------------------------------------+
+// Interrupt
+//--------------------------------------------------------------------+
 
-  // if (hcsplt.split_en) {
-  // if (edpt->hcchar_bm.ep_num == 1) {
-  //   TU_LOG1("Frame %u, ch %u: ep %u, hcint 0x%04lX ", dwc2->hfnum_bm.num, ch_id, hcsplt.ep_num, hcint);
-  //   print_hcint(hcint);
-  // }
+// Translate xHCI DCI to TinyUSB endpoint address
+static const uint8_t DCI2EP[30] = {
+  0x00, 0x01, 0x81, 0x02, 0x82, 0x03, 0x83,
+  0x04, 0x84, 0x05, 0x85, 0x06, 0x86
+};
 
-  if (hcint & HCINT_XFER_COMPLETE) {
-    if (edpt->hcchar_bm.ep_num != 0) {
-      edpt->next_pid = hctsiz.pid; // save pid (already toggled)
-    }
-
-    const uint16_t remain_packets = hctsiz.packet_count;
-    if (hcsplt.split_en && remain_packets && xfer->fifo_bytes == edpt->hcchar_bm.ep_size) {
-      // Split can only complete 1 transaction (up to 1 packet) at a time, schedule more
-      hcsplt.split_compl = 0;
-      channel->hcsplt = hcsplt.value;
-    } else {
-      xfer->result = XFER_RESULT_SUCCESS;
-    }
-
-    channel_disable(dwc2, channel);
-  } else if (hcint & (HCINT_XACT_ERR | HCINT_BABBLE_ERR | HCINT_STALL)) {
-    if (hcint & HCINT_STALL) {
-      xfer->result = XFER_RESULT_STALLED;
-    } else if (hcint & HCINT_BABBLE_ERR) {
-      xfer->result = XFER_RESULT_FAILED;
-    } else if (hcint & HCINT_XACT_ERR) {
-      xfer->err_count++;
-      channel->hcintmsk |= HCINT_ACK;
-    }
-
-    channel_disable(dwc2, channel);
-  } else if (hcint & HCINT_NYET) {
-    // restart complete split
-    hcsplt.split_compl = 1;
-    channel->hcsplt = hcsplt.value;
-    xfer->halted_nyet = 1;
-    channel_disable(dwc2, channel);
-  } else if (hcint & HCINT_NAK) {
-    // NAK received, disable channel to flush all posted request and try again
-    if (hcsplt.split_en) {
-      hcsplt.split_compl = 0; // restart with start-split
-      channel->hcsplt = hcsplt.value;
-    }
-
-    channel_disable(dwc2, channel);
-  } else if (hcint & HCINT_ACK) {
-    xfer->err_count = 0;
-
-    if (hcsplt.split_en) {
-      if (!hcsplt.split_compl) {
-        // start split is ACK --> do complete split
-        channel->hcintmsk |= HCINT_NYET;
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        channel_send_in_token(dwc2, channel);
-      } else {
-        // do nothing for complete split with DATA, this will trigger XferComplete and handled there
-      }
-    } else {
-      // ACK with data
-      const uint16_t remain_packets = hctsiz.packet_count;
-      if (remain_packets) {
-        // still more packet to receive, also reset to start split
-        hcsplt.split_compl = 0;
-        channel->hcsplt = hcsplt.value;
-        channel_send_in_token(dwc2, channel);
-      }
-    }
-  } else if (hcint & HCINT_HALTED) {
-    channel->hcintmsk &= ~HCINT_HALTED;
-    if (xfer->result != XFER_RESULT_INVALID) {
-      is_done = true;
-    } else if (xfer->err_count == HCD_XFER_ERROR_MAX) {
-      xfer->result = XFER_RESULT_FAILED;
-      is_done = true;
-    } else {
-      // got here due to NAK or NYET
-      channel_xfer_in_retry(dwc2, ch_id, hcint);
-    }
-  } else if (hcint & HCINT_DATATOGGLE_ERR) {
-    xfer->err_count = 0;
-    TU_ASSERT(false);
-  }
-  return is_done;
-}
-
-static bool handle_channel_out_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
-  bool is_done = false;
-
-  if (hcint & HCINT_XFER_COMPLETE) {
-    is_done = true;
-    xfer->result = XFER_RESULT_SUCCESS;
-    channel->hcintmsk &= ~HCINT_ACK;
-    if (hcint & HCINT_NYET) {
-      // complete transfer with NYET, do ping next time
-      edpt->next_do_ping = 1;
-    }
-  } else if (hcint & HCINT_STALL) {
-    xfer->result = XFER_RESULT_STALLED;
-    channel_disable(dwc2, channel);
-  } else if (hcint & HCINT_NYET) {
-    xfer->err_count = 0;
-    if (hcsplt.split_en) {
-      // retry complete split
-      hcsplt.split_compl = 1;
-      channel->hcsplt = hcsplt.value;
-      channel->hcchar |= HCCHAR_CHENA;
-    } else {
-      edpt->next_do_ping = 1;
-      channel_xfer_out_wrapup(dwc2, ch_id);
-      channel_disable(dwc2, channel);
-    }
-  } else if (hcint & (HCINT_NAK | HCINT_XACT_ERR)) {
-    // clean up transfer so far, disable and start again later
-    channel_xfer_out_wrapup(dwc2, ch_id);
-    channel_disable(dwc2, channel);
-    if (hcint & HCINT_XACT_ERR) {
-      xfer->err_count++;
-      channel->hcintmsk |= HCINT_ACK;
-    } else {
-      // NAK disable channel to flush all posted request and try again
-      edpt->next_do_ping = 1;
-      xfer->err_count = 0;
-    }
-  } else if (hcint & HCINT_HALTED) {
-    channel->hcintmsk &= ~HCINT_HALTED;
-    if (xfer->result != XFER_RESULT_INVALID) {
-      is_done = true;
-    } else if (xfer->err_count == HCD_XFER_ERROR_MAX) {
-      xfer->result = XFER_RESULT_FAILED;
-      is_done = true;
-    } else {
-      // Got here due to NAK or NYET
-      TU_ASSERT(channel_xfer_start(dwc2, ch_id));
-    }
-  } else if (hcint & HCINT_ACK) {
-    xfer->err_count = 0;
-    channel->hcintmsk &= ~HCINT_ACK;
-    if (hcsplt.split_en) {
-      if (!hcsplt.split_compl) {
-        // ACK for start split --> do complete split
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        channel->hcchar |= HCCHAR_CHENA;
-      }
-    } else {
-      // ACK interrupt is only enabled for Split and PING
-      // ACK for PING, which mean device is ready to receive data
-      channel->hctsiz &= ~HCTSIZ_DOPING; // HC already cleared PING bit, but we clear anyway
-      channel->hcchar |= HCCHAR_CHENA;
-    }
-  }
-
-  if (is_done) {
-    xfer->xferred_bytes += xfer->fifo_bytes;
-    xfer->fifo_bytes = 0;
-  }
-
-  return is_done;
-}
-#endif
-
-#if CFG_TUH_DWC2_DMA_ENABLE
-static bool handle_channel_in_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-  dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
-  const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
-
-  bool is_done = false;
-
-  // TU_LOG1("in  hcint = %02lX\r\n", hcint);
-
-  if (hcint & HCINT_HALTED) {
-    if (hcint & (HCINT_XFER_COMPLETE | HCINT_STALL | HCINT_BABBLE_ERR)) {
-      const uint16_t remain_bytes = (uint16_t) hctsiz.xfer_size;
-      const uint16_t remain_packets = hctsiz.packet_count;
-      const uint16_t actual_len = edpt->buflen - remain_bytes;
-      xfer->xferred_bytes += actual_len;
-
-      is_done = true;
-
-      if (hcint & HCINT_STALL) {
-        xfer->result = XFER_RESULT_STALLED;
-      } else if (hcint & HCINT_BABBLE_ERR) {
-        xfer->result = XFER_RESULT_FAILED;
-      } else if (hcsplt.split_en && remain_packets && actual_len == hcchar.ep_size) {
-        // Split can only complete 1 transaction (up to 1 packet) at a time, schedule more
-        is_done = false;
-        edpt->buffer += actual_len;
-        edpt->buflen -= actual_len;
-
-        hcsplt.split_compl = 0;
-        channel->hcsplt = hcsplt.value;
-        channel_xfer_in_retry(dwc2, ch_id, hcint);
-      } else {
-        xfer->result = XFER_RESULT_SUCCESS;
-      }
-
-      xfer->err_count = 0;
-      channel->hcintmsk &= ~HCINT_ACK;
-    } else if (hcint & HCINT_XACT_ERR) {
-      xfer->err_count++;
-      if (xfer->err_count >=  HCD_XFER_ERROR_MAX) {
-        is_done = true;
-        xfer->result = XFER_RESULT_FAILED;
-      } else {
-        channel->hcintmsk |= HCINT_ACK | HCINT_NAK | HCINT_DATATOGGLE_ERR;
-        hcsplt.split_compl = 0;
-        channel->hcsplt = hcsplt.value;
-        channel_xfer_in_retry(dwc2, ch_id, hcint);
-      }
-    } else if (hcint & HCINT_NYET) {
-      // Must handle nyet before nak or ack. Could get a nyet at the same time as either of those on a BULK/CONTROL
-      // OUT that started with a PING. The nyet takes precedence.
-      if (hcsplt.split_en) {
-        // split not yet mean hub has no data, retry complete split
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        channel_xfer_in_retry(dwc2, ch_id, hcint);
-      }
-    } else if (hcint & HCINT_ACK) {
-      xfer->err_count = 0;
-      channel->hcintmsk &= ~HCINT_ACK;
-      if (hcsplt.split_en) {
-        // start split is ACK --> do complete split
-        // TODO: for ISO must use xact_pos to plan complete split based on microframe (up to 187.5 bytes/uframe)
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        if (channel_is_periodic(channel->hcchar)) {
-          hcchar.odd_frame = 1 - (dwc2->hfnum & 1); // transfer on next frame
-          channel->hcchar = hcchar.value;
-        }
-        channel_send_in_token(dwc2, channel);
-      }
-    } else if (hcint & (HCINT_NAK | HCINT_DATATOGGLE_ERR)) {
-      xfer->err_count = 0;
-      channel->hcintmsk &= ~(HCINT_NAK | HCINT_DATATOGGLE_ERR);
-      hcsplt.split_compl = 0; // restart with start-split
-      channel->hcsplt = hcsplt.value;
-      channel_xfer_in_retry(dwc2, ch_id, hcint);
-    } else if (hcint & HCINT_FARME_OVERRUN) {
-      // retry start-split in next binterval
-      channel_xfer_in_retry(dwc2, ch_id, hcint);
-    }
-  }
-
-  return is_done;
-}
-
-static bool handle_channel_out_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-  dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
-  const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-  dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
-
-  bool is_done = false;
-
-  // TU_LOG1("out hcint = %02lX\r\n", hcint);
-
-  if (hcint & HCINT_HALTED) {
-    if (hcint & (HCINT_XFER_COMPLETE | HCINT_STALL)) {
-      is_done = true;
-      xfer->err_count = 0;
-      if (hcint & HCINT_XFER_COMPLETE) {
-        xfer->result = XFER_RESULT_SUCCESS;
-        xfer->xferred_bytes += edpt->buflen;
-      } else {
-        xfer->result = XFER_RESULT_STALLED;
-        channel_xfer_out_wrapup(dwc2, ch_id);
-      }
-      channel->hcintmsk &= ~HCINT_ACK;
-    } else if (hcint & HCINT_XACT_ERR) {
-     if (hcint & (HCINT_NAK | HCINT_NYET | HCINT_ACK)) {
-       xfer->err_count = 0;
-       // clean up transfer so far and start again
-       channel_xfer_out_wrapup(dwc2, ch_id);
-       channel_xfer_start(dwc2, ch_id);
-     } else {
-       xfer->err_count++;
-       if (xfer->err_count >= HCD_XFER_ERROR_MAX) {
-         xfer->result = XFER_RESULT_FAILED;
-         is_done = true;
-       } else {
-         // clean up transfer so far and start again
-         channel_xfer_out_wrapup(dwc2, ch_id);
-         channel_xfer_start(dwc2, ch_id);
-       }
-     }
-    } else if (hcint & HCINT_NYET) {
-      if (hcsplt.split_en && hcsplt.split_compl) {
-        // split not yet mean hub has no data, retry complete split
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        channel->hcchar |= HCCHAR_CHENA;
-      }
-    } else if (hcint & HCINT_ACK) {
-      xfer->err_count = 0;
-      if (hcsplt.split_en && !hcsplt.split_compl) {
-        // start split is ACK --> do complete split
-        hcsplt.split_compl = 1;
-        channel->hcsplt = hcsplt.value;
-        channel->hcchar |= HCCHAR_CHENA;
-      }
-    }
-  } else if (hcint & HCINT_ACK) {
-    xfer->err_count = 0;
-    channel->hcintmsk &= ~HCINT_ACK;
-  }
-
-  return is_done;
-}
-#endif
-
-static void handle_channel_irq(uint8_t rhport, bool in_isr) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const bool is_dma = dma_host_enabled(dwc2);
-  const uint8_t max_channel = dwc2_channel_count(dwc2);
-
-  for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    if (tu_bit_test(dwc2->haint, ch_id)) {
-      dwc2_channel_t* channel = &dwc2->channel[ch_id];
-      hcd_xfer_t* xfer = &_hcd_data.xfer[ch_id];
-      TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX,);
-      dwc2_channel_char_t hcchar = {.value = channel->hcchar};
-
-      const uint32_t hcint = channel->hcint;
-      channel->hcint = hcint; // clear interrupt
-
-      bool is_done = false;
-      if (is_dma) {
-        #if CFG_TUH_DWC2_DMA_ENABLE
-        if (hcchar.ep_dir == TUSB_DIR_OUT) {
-          is_done = handle_channel_out_dma(dwc2, ch_id, hcint);
-        } else {
-          is_done = handle_channel_in_dma(dwc2, ch_id, hcint);
-          if (is_done && (channel->hcdma > xfer->xferred_bytes)) {
-            // hcdma is increased by word --> need to align4
-            hcd_dcache_invalidate((void*) tu_align4(channel->hcdma - xfer->xferred_bytes), xfer->xferred_bytes);
-          }
-        }
-        #endif
-      } else {
-        #if CFG_TUH_DWC2_SLAVE_ENABLE
-        if (hcchar.ep_dir == TUSB_DIR_OUT) {
-          is_done = handle_channel_out_slave(dwc2, ch_id, hcint);
-        } else {
-          is_done = handle_channel_in_slave(dwc2, ch_id, hcint);
-        }
-        #endif
-      }
-
-      if (is_done) {
-        const uint8_t ep_addr = tu_edpt_addr(hcchar.ep_num, hcchar.ep_dir);
-        hcd_event_xfer_complete(hcchar.dev_addr, ep_addr, xfer->xferred_bytes, (xfer_result_t)xfer->result, in_isr);
-        channel_dealloc(dwc2, ch_id);
-      }
-    }
-  }
-}
-
-// SOF is enabled for scheduled periodic transfer
-static bool handle_sof_irq(uint8_t rhport, bool in_isr) {
-  (void) in_isr;
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  dwc2->gintsts = GINTSTS_SOF; // Clear the SOF interrupt flag
-
-  bool more_isr = false;
-
-  // If highspeed then SOF is 125us, else 1ms
-  const uint32_t ucount = (hprt_speed_get(dwc2) == TUSB_SPEED_HIGH ? 1 : 8);
-
-  for(uint8_t ep_id = 0; ep_id < CFG_TUH_DWC2_ENDPOINT_MAX; ep_id++) {
-    hcd_endpoint_t* edpt = &_hcd_data.edpt[ep_id];
-    if (edpt->hcchar_bm.enable && channel_is_periodic(edpt->hcchar) && edpt->uframe_countdown > 0) {
-      edpt->uframe_countdown -= tu_min32(ucount, edpt->uframe_countdown);
-      if (edpt->uframe_countdown == 0) {
-        if (!edpt_xfer_kickoff(dwc2, ep_id)) {
-          edpt->uframe_countdown = ucount; // failed to start, try again next frame
-        }
-      }
-
-      more_isr = true;
-    }
-  }
-
-  return more_isr;
-}
-
-// Config HCFG FS/LS clock and HFIR for SOF interval according to link speed (value is in PHY clock unit)
-static void port0_enable(dwc2_regs_t* dwc2, tusb_speed_t speed) {
-  uint32_t hcfg = dwc2->hcfg & ~HCFG_FSLS_PHYCLK_SEL;
-
-  const dwc2_gusbcfg_t gusbcfg = {.value = dwc2->gusbcfg};
-  uint32_t phy_clock;
-
-  if (gusbcfg.phy_sel) {
-    phy_clock = 48; // dedicated FS is 48Mhz
-    if (speed == TUSB_SPEED_LOW) {
-      hcfg |= HCFG_FSLS_PHYCLK_SEL_6MHZ;
-    } else {
-      hcfg |= HCFG_FSLS_PHYCLK_SEL_48MHZ;
-    }
-  } else {
-    if (gusbcfg.ulpi_utmi_sel) {
-      phy_clock = 60; // ULPI 8-bit is 60Mhz
-    } else {
-      // UTMI+ 16-bit is 30Mhz, 8-bit is 60Mhz
-      phy_clock = gusbcfg.phy_if16 ? 30 : 60;
-
-      // Enable UTMI+ low power mode 48Mhz external clock if not highspeed
-      if (speed == TUSB_SPEED_HIGH) {
-        dwc2->gusbcfg &= ~GUSBCFG_PHYLPCS;
-      } else {
-        dwc2->gusbcfg |= GUSBCFG_PHYLPCS;
-        // may need to reset port
-      }
-    }
-    hcfg |= HCFG_FSLS_PHYCLK_SEL_30_60MHZ;
-  }
-
-  dwc2->hcfg = hcfg;
-
-  uint32_t hfir = dwc2->hfir & ~HFIR_FRIVL_Msk;
-  if (speed == TUSB_SPEED_HIGH) {
-    hfir |= 125*phy_clock - 1; // The "- 1" is the correct value. The Synopsys databook was corrected in 3.30a
-  } else {
-    hfir |= 1000*phy_clock - 1;
-  }
-
-  dwc2->hfir = hfir;
-}
-
-/* Handle Host Port interrupt, possible source are:
-   - Connection Detection
-   - Enable Change
-   - Over Current Change
-*/
-static void handle_hprt_irq(uint8_t rhport, bool in_isr) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const dwc2_hprt_t hprt_bm = {.value = dwc2->hprt};
-  uint32_t hprt = hprt_bm.value & ~HPRT_W1_MASK;
-
-  if (hprt_bm.conn_detected) {
-    // Port Connect Detect
-    hprt |= HPRT_CONN_DETECT;
-
-    if (hprt_bm.conn_status) {
-      hcd_event_device_attach(rhport, in_isr);
-    }
-  }
-
-  if (hprt_bm.enable_change) {
-    // Port enable change
-    hprt |= HPRT_ENABLE_CHANGE;
-
-    if (hprt_bm.enable) {
-      // Port enable
-      const tusb_speed_t speed = hprt_speed_get(dwc2);
-      port0_enable(dwc2, speed);
-    } else {
-      // TU_ASSERT(false, );
-    }
-  }
-
-  dwc2->hprt = hprt; // clear interrupt
-}
-
-/* Interrupt Hierarchy
-               HCINTn       HPRT
-                 |           |
-               HAINT.CHn     |
-                 |           |
-    GINTSTS :  HCInt     | PrtInt | NPTxFEmp | PTxFEmpp | RXFLVL | SOF
-*/
 void hcd_int_handler(uint8_t rhport, bool in_isr) {
-  dwc2_regs_t* dwc2 = DWC2_REG(rhport);
-  const uint32_t gintmsk = dwc2->gintmsk;
-  const uint32_t gintsts = dwc2->gintsts & gintmsk;
+  (void) rhport;
 
-  // TU_LOG1_HEX(gintsts);
-
-  if (gintsts & GINTSTS_CONIDSTSCHNG) {
-    // Connector ID status change
-    dwc2->gintsts = GINTSTS_CONIDSTSCHNG;
-
-    //if (dwc2->gotgctl)
-    // dwc2->hprt = HPRT_POWER; // power on port to turn on VBUS
-    //dwc2->gintmsk |= GINTMSK_PRTIM;
-    // TODO wait for SRP if OTG
+  // ack USBSTS/IMAN; on controller error the xHCI is restarted and there is nothing to process
+  if (!xhci_irq_ack()) {
+    return;
   }
 
-  if (gintsts & GINTSTS_SOF) {
-    const bool more_sof = handle_sof_irq(rhport, in_isr);
-    if (!more_sof) {
-      dwc2->gintmsk &= ~GINTSTS_SOF;
+  xhci_event_trb_t event_data = xhci_get_event(&xhci_handle);
+  const xhci_event_trb_type_t trb_id = (xhci_event_trb_type_t) event_data.event_trb.trb_control_field.trb_type;
+
+  switch (trb_id) {
+    case TRANSFER_EVENT: {
+      xtc_event_t tr_event = event_data.tr_event;
+      const int ep_dci = (int) tr_event.tc_ctrl_params.ep_dci;
+      if (ep_dci < 1 || ep_dci > (int) TU_ARRAY_SIZE(DCI2EP)) {
+        break;
+      }
+      const uint8_t ep_addr = DCI2EP[ep_dci - 1];
+
+      if (tr_event.tc_status_params.compl_code == (uint32_t) EVENT_SUCCESS) {
+        const uint32_t xfer_bytes = tr_event.tc_status_params.transfer_len;
+        handle_endpoint_transfer((uint8_t) ep_dci, ep_addr);
+        hcd_event_xfer_complete(device_addr, ep_addr, xfer_bytes, XFER_RESULT_SUCCESS, in_isr);
+      } else if (tr_event.tc_status_params.compl_code == (uint32_t) STALL_ERROR) {
+        hcd_event_xfer_complete(device_addr, ep_addr, 0, XFER_RESULT_STALLED, in_isr);
+      } else {
+        // other completion codes are not reported yet (unchanged from the previous port)
+      }
+      break;
     }
-  }
 
-  if (gintsts & GINTSTS_HPRTINT) {
-    // Host port interrupt: source is cleared in HPRT register
-    // TU_LOG1_HEX(dwc2->hprt);
-    handle_hprt_irq(rhport, in_isr);
-  }
+    case PORT_STATUS_CHANGE_EVENT: {
+      const xhci_psceg_params_t rh_params = xhci_handle_psceg_event(event_data.psc_event);
 
-  if (gintsts & GINTSTS_HCINT) {
-    // Host Channel interrupt: source is cleared in HCINT register
-    // must be handled after TX FIFO empty
-    handle_channel_irq(rhport, in_isr);
-  }
-
-  if (gintsts & GINTSTS_DISCINT) {
-    // Device disconnected
-    dwc2->gintsts = GINTSTS_DISCINT;
-
-    if (!(dwc2->hprt & HPRT_CONN_STATUS)) {
-      hcd_event_device_remove(rhport, in_isr);
+      // RH port id should be always less than maximum supported port
+      if ((rh_params.rhport < 1U) || (rh_params.rhport > xhci_handle.xhc_cap_ptr->hcsparams1_params.max_ports)) {
+        break;
+      }
+      if (rh_params.dev_attach_flag == 1) {
+        hcd_event_device_attach((uint8_t) rh_params.rhport, in_isr);
+        xhci_update_device_rh_params(&xhci_handle, rh_params);
+      } else if (rh_params.dev_attach_flag == -1) {
+        hcd_event_device_remove((uint8_t) rh_params.rhport, in_isr);
+      } else {
+        // Nothing to be handled for tinyusb stack
+      }
+      break;
     }
+
+    case COMMAND_COMPLETION_EVENT:
+      cmd_event_complete(event_data.cc_event, in_isr);
+      break;
+
+    default:
+      break;
   }
-
-#if CFG_TUH_DWC2_SLAVE_ENABLE
-  // RxFIFO non-empty interrupt handling
-  if (gintsts & GINTSTS_RXFLVL) {
-    // RXFLVL bit is read-only
-    dwc2->gintmsk &= ~GINTSTS_RXFLVL; // disable RXFLVL interrupt while reading
-
-    do {
-      handle_rxflvl_irq(rhport); // read all packets
-    } while(dwc2->gintsts & GINTSTS_RXFLVL);
-
-    dwc2->gintmsk |= GINTSTS_RXFLVL;
-  }
-
-  if (gintsts & GINTSTS_NPTX_FIFO_EMPTY) {
-    // NPTX FIFO empty interrupt, this is read-only and cleared by hardware when FIFO is written
-    const bool more_nptxfe = handle_txfifo_empty(dwc2, false);
-    if (!more_nptxfe) {
-      // no more pending packet, disable interrupt
-      dwc2->gintmsk &= ~GINTSTS_NPTX_FIFO_EMPTY;
-    }
-  }
-
-  if (gintsts & GINTSTS_PTX_FIFO_EMPTY) {
-    // PTX FIFO empty interrupt, this is read-only and cleared by hardware when FIFO is written
-    const bool more_ptxfe = handle_txfifo_empty(dwc2, true);
-    if (!more_ptxfe) {
-      // no more pending packet, disable interrupt
-      dwc2->gintmsk &= ~GINTSTS_PTX_FIFO_EMPTY;
-    }
-  }
-#endif
 }
 
 #endif

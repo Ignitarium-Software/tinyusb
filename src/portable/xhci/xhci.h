@@ -203,7 +203,7 @@ int alloc_xhci_contexts(struct xhci_data *xhci_ptr);
  * slot id
  * @param[in] xhci_ptr : reference to xhci hcd structure
  */
-void update_dcbaa_entry(struct xhci_data *xhci_ptr);
+void xhci_update_dcbaa_entry(struct xhci_data *xhci_ptr);
 
 /**
  * @brief  deallocate xhci context memories
@@ -218,7 +218,7 @@ void deallocate_xhci_context(struct xhci_data *xhci_ptr);
  *  0, on successful allocation
  *  errno, incase of failure
  */
-int alloc_input_device_context(struct xhci_data *xhci_ptr);
+int xhci_alloc_input_device_context(struct xhci_data *xhci_ptr);
 
 /**
  * @brief : allocate xhci output device context
@@ -227,7 +227,7 @@ int alloc_input_device_context(struct xhci_data *xhci_ptr);
  *  0, on successful allocation
  *  errno, incase of failure
  */
-int alloc_output_device_context(struct xhci_data *xhci_ptr);
+int xhci_alloc_output_device_context(struct xhci_data *xhci_ptr);
 
 /**
  * @brief initialize input device context data structure
@@ -236,7 +236,7 @@ int alloc_output_device_context(struct xhci_data *xhci_ptr);
  *  0, on successful allocation
  *  errno, incase of failure
  */
-int init_input_device_context(struct xhci_data *xhci_ptr);
+int xhci_init_input_device_context(struct xhci_data *xhci_ptr);
 
 /**
  * @brief allocate xhci device context base address array and store the base
@@ -246,13 +246,13 @@ int init_input_device_context(struct xhci_data *xhci_ptr);
  *  0, on successful allocation
  *  errno, incase of failure
  */
-int alloc_dcbaa(struct xhci_data *xhci_ptr);
+int xhci_alloc_dcbaa(struct xhci_data *xhci_ptr);
 
 /**
  * @brief update xhci slot context data structure
  * @param[in]  xhci_ptr -  reference of xhci hcd controller
  */
-void update_xhc_slot_context(struct xhci_data *xhci_ptr);
+void xhci_update_slot_context(struct xhci_data *xhci_ptr);
 
 /**
  * @brief  initialize endpoint context data structure
@@ -262,14 +262,14 @@ void update_xhc_slot_context(struct xhci_data *xhci_ptr);
  *  RET_SUCCESS, on successful allocation
  *  RET_FAIL, incase of failure
  */
-void init_xhc_endpoint_context(struct xhci_data *xhci, xhci_ep_type_t ep_type);
+void xhci_init_endpoint_context(struct xhci_data *xhci, xhci_ep_type_t ep_type);
 
 /**
  * @brief  return the device address from the output context data structure
  * @param[in]  xhci -  reference of xhci hcd controller
  * @return device address
  */
-uint8_t get_xhc_device_address(struct xhci_data *xhci_ptr);
+uint8_t xhci_get_device_address(struct xhci_data *xhci_ptr);
 
 /*XHCI capability register APIs*/
 
@@ -287,7 +287,7 @@ xhci_oper_reg_params_t get_xhci_op_registers(void);
  *  0, if operation is successful
  *  errno, on failure
  */
-int get_xhc_cap_params(struct xhci_data *xhci);
+int xhci_get_cap_params(struct xhci_data *xhci);
 
 /**
  * @brief  function to check if the pointer address passed is byte aligned
@@ -296,7 +296,7 @@ int get_xhc_cap_params(struct xhci_data *xhci);
  *  0, on successful allocation
  *  errno, incase of failure
  */
-int init_xhc_event_ring(struct xhci_data *xhci_ptr);
+int xhci_init_event_ring(struct xhci_data *xhci_ptr);
 
 /**
  * @brief Initialize xHCI context parameters.
@@ -317,7 +317,7 @@ int init_xhci_context_params(struct xhci_data *xhci_ptr);
  *  0  on successful allocation
  *  errno, incase of failure
  */
-int is_ptr_mem_aligned(uint64_t addr, uint32_t byte);
+int xhci_is_ptr_mem_aligned(uint64_t addr, uint32_t byte);
 
 /**
  * @brief  parse the endpoint descriptors
@@ -356,5 +356,10 @@ void start_xhci_controller(void);
  *  false incase of failure
  */
 bool xhci_init(struct xhci_data *xhci);
+
+/**
+ * @brief  read the microframe index (MFINDEX[13:0], 125us units) from the runtime registers
+ */
+uint32_t xhci_get_mfindex(void);
 
 #endif  /*__XHCI_H__ */

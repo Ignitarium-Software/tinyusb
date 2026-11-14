@@ -11,14 +11,13 @@
 #include "xhci.h"
 #include "xhci_endpoints.h"
 #include "xhci_rings.h"
-#include "osal_log.h"
-#include "socfpga_cache.h"
+#include "xhci_port.h"
 
 /**
  * @brief Setup the TRB with the control transfer data. For xHCI, control transfer consists of 3 stages.
  *        ( Data stage is optional). All the 3 stages are populated in this api.
  */
-void configure_setup_stage(struct xhci_data *xhci, void *buffer,
+void xhci_configure_setup_stage(struct xhci_data *xhci, void *buffer,
         usb_control_request_t *setup_req)
 {
     uint32_t end_ctrl_flags = 0U;
@@ -29,9 +28,9 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
     }
     do
     {
-        if (is_link_trb(ptr) == 1)
+        if (xhci_is_link_trb(ptr) == 1)
         {
-            ptr = get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
+            ptr = xhci_get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
         }
         /* check for Enqueue pointer location */
         if ((ptr->control & 0x1U) == 1U)
@@ -63,9 +62,9 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
 
     ptr++;
 
-    if (is_link_trb(ptr) == 1)
+    if (xhci_is_link_trb(ptr) == 1)
     {
-        ptr = get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
+        ptr = xhci_get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
     }
 
     if (setup_req->wLength > 0U)
@@ -85,9 +84,9 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
 
         ptr++;
 
-        if (is_link_trb(ptr) == 1)
+        if (xhci_is_link_trb(ptr) == 1)
         {
-            ptr = get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
+            ptr = xhci_get_next_trb_segment(ptr, &xhci->ep0.pcs_flag);
         }
     }
 
@@ -104,14 +103,14 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
 
     ptr->control = end_ctrl_flags;
 
-    cache_force_write_back((void *) xhci->ep0.ep_tr_enq_ptr,
+    xhci_dcache_clean((void *) xhci->ep0.ep_tr_enq_ptr,
            EP_TRB_SEG_LENGTH * sizeof(xhci_trb_t));
 }
 
 /**
  * @brief Get the endpoint DCI from the endpoint address
  */
-uint8_t get_ep_dci(uint8_t ep_addr)
+uint8_t xhci_get_ep_dci(uint8_t ep_addr)
 {
     uint8_t ep_dir;
     uint8_t ep_num;
@@ -197,9 +196,9 @@ static void fill_endpoint_transfer_ring(struct ep_priv *ep_ctx, void *buffer,
 
     while (true)
     {
-        if (is_link_trb(ptr) == 1)
+        if (xhci_is_link_trb(ptr) == 1)
         {
-            ptr = get_next_trb_segment(ptr, &ep_ctx->pcs_flag);
+            ptr = xhci_get_next_trb_segment(ptr, &ep_ctx->pcs_flag);
         }
 
         c_bit = (ptr->control & 0x00000001U);
@@ -270,9 +269,9 @@ static void fill_endpoint_transfer_ring(struct ep_priv *ep_ctx, void *buffer,
 
         ptr++;
 
-        if (is_link_trb(ptr) == 1)
+        if (xhci_is_link_trb(ptr) == 1)
         {
-            ptr = get_next_trb_segment(ptr, &ep_ctx->pcs_flag);
+            ptr = xhci_get_next_trb_segment(ptr, &ep_ctx->pcs_flag);
         }
     }
 
@@ -285,14 +284,14 @@ static void fill_endpoint_transfer_ring(struct ep_priv *ep_ctx, void *buffer,
     end_ctrl_flags |= (ep_ctx->pcs_flag);
 
     ptr->control = end_ctrl_flags;
-    cache_force_write_back((void *) ep_ctx->ep_tr_enq_ptr,
+    xhci_dcache_clean((void *) ep_ctx->ep_tr_enq_ptr,
             EP_TRB_SEG_LENGTH * sizeof(xhci_trb_t));
 }
 
 /**
  * @brief Initiate an endpoint transfer on bulk endpoints
  */
-bool endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
+bool xhci_endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
         void *buffer, uint32_t buflen)
 {
     uint8_t ICI;
@@ -341,7 +340,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
         xhci_ptr->msc_eps.ep_in.pcs_flag = 1U;
 
         /* For xHCI spec, endpoint context index is ep_dci -1 */
-        xhci_ptr->msc_eps.ep_in.ep_index = get_ep_dci(desc->bEndpointAddress) -
+        xhci_ptr->msc_eps.ep_in.ep_index = xhci_get_ep_dci(desc->bEndpointAddress) -
                 0x1U;
         xhci_ptr->msc_eps.ep_in.ep_addr = desc->bEndpointAddress;
 
@@ -353,7 +352,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
         else
         {
             xhci_trb_t *enq_ptr;
-            enq_ptr = allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
+            enq_ptr = xhci_allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
                     EP_TRB_SEG_LENGTH);
             if (enq_ptr == NULL)
             {
@@ -383,7 +382,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
         xhci_ptr->msc_eps.ep_out.pcs_flag = 1U;
 
         /* For xHCI spec, endpoint context index is ep_dci -1 */
-        xhci_ptr->msc_eps.ep_out.ep_index = get_ep_dci(desc->bEndpointAddress) -
+        xhci_ptr->msc_eps.ep_out.ep_index = xhci_get_ep_dci(desc->bEndpointAddress) -
                 0x1U;
         xhci_ptr->msc_eps.ep_out.ep_addr = desc->bEndpointAddress;
 
@@ -394,7 +393,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
         }
         else
         {
-            enq_ptr = allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
+            enq_ptr = xhci_allocate_ring_segment(XHCI_EP_TR_RING_ALIGN,
                     EP_TRB_SEG_LENGTH);
             if (enq_ptr == NULL)
             {

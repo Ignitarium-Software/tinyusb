@@ -11,16 +11,6 @@
 
 #include <stdbool.h>
 
-/* Function pointer for tinyusb interrupt handler */
-typedef void (*tusb_int_ptr)(uint8_t rhport, bool in_isr);
-
-/* descriptor to pass to interrupt handler */
-struct xhci_int_desc
-{
-    tusb_int_ptr int_handler; /* !< pointer to tinyusb interrupt handler */
-};
-
-typedef struct xhci_int_desc *xhci_int_ptr_t;
 /*
  * @brief  enable xhci interrupts
  */
@@ -32,9 +22,9 @@ void enable_xhci_interrupts(void);
 void disable_xhci_interrupts(void);
 
 /*
- * @brief  register USB3 ISR
- * @param[in] int_handler - pointer to tinyusb interrupt handler
+ * @brief Acknowledge a pending xHCI interrupt; resets the controller on HSE/HCE
+ * @return true if the event ring should be processed
  */
-bool register_usb3ISR(xhci_int_ptr_t int_handler);
+bool xhci_irq_ack(void);
 
 #endif  /* __XHCI_INTERRUPTS_H__ */
