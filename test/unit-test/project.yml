@@ -127,7 +127,12 @@
 #  - Specifying symbols used during test preprocessing
 :defines:
   :test:
-    - _UNITY_TEST_
+    :*:
+      - _UNITY_TEST_
+    :test_hcd_multi:
+      - CFG_TUH_ENABLED=1
+      - CFG_TUH_HCD_MULTI=1
+      - CFG_TUH_HCD_MULTI_COUNT=3
   :release: []
 
   # Enable to inject name of a test as a unique compilation symbol into its respective executable build.

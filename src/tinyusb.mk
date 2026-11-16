@@ -20,9 +20,14 @@ TINYUSB_SRC_C += \
 	src/class/vendor/vendor_device.c \
   src/host/usbh.c \
   src/host/hub.c \
+  src/host/hcd_multi.c \
   src/class/cdc/cdc_host.c \
   src/class/hid/hid_host.c \
   src/class/midi/midi_host.c \
   src/class/msc/msc_host.c \
   src/class/vendor/vendor_host.c \
   src/typec/usbc.c \
+
+# CFG_TUH_HCD_MULTI (see src/host/hcd_rename.h): compile every object of each HCD instance with its
+# own name and the rename header force-included, e.g. with target-specific variables:
+#   $(BUILD)/obj/src/portable/synopsys/dwc2/%.o: CFLAGS += -DTUH_HCD_NAME=dwc2 -include host/hcd_rename.h
