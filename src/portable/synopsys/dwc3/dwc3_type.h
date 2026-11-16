@@ -7,8 +7,8 @@
  * Field positions follow the Agilex 5 HPS register map.
  */
 
-#ifndef TYPE_H_
-#define TYPE_H_
+#ifndef SOCFPGA_USB_GLOBAL_TYPE_H_
+#define SOCFPGA_USB_GLOBAL_TYPE_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -17,6 +17,16 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Controller
+typedef struct
+{
+  uintptr_t reg_base;
+  uint32_t  irqnum;
+  uint8_t   ep_count;
+  uint8_t   ep_in_count;
+  uint32_t  ep_fifo_size;
+} dwc3_controller_t;
 
 /* Bit positions for GSBUSCFG0. */
 #define GSBUSCFG0_INCRBRSTENA_POS                                   0U
@@ -1797,8 +1807,6 @@ typedef struct {
   volatile dwc3_gusb2_rhbctl_t gusb2_rhbctl; // 0x540
 } dwc3_gbl_regs_t;
 
-#define GBL_REG_BASE 0x1100C100U
-
 TU_VERIFY_STATIC(offsetof(dwc3_gbl_regs_t, gsbuscfg0) == 0x000, "incorrect register offset");
 TU_VERIFY_STATIC(offsetof(dwc3_gbl_regs_t, gsbuscfg1) == 0x004, "incorrect register offset");
 TU_VERIFY_STATIC(offsetof(dwc3_gbl_regs_t, gtxthrcfg) == 0x008, "incorrect register offset");
@@ -1889,4 +1897,4 @@ TU_VERIFY_STATIC(sizeof(dwc3_gbl_regs_t) == 0x544, "incorrect register map size"
 }
 #endif
 
-#endif /* TYPE_H_ */
+#endif /* SOCFPGA_USB_GLOBAL_TYPE_H_ */

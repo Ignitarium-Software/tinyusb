@@ -40,10 +40,10 @@ target_include_directories(agilex5-tinyusb PUBLIC
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc2/dwc2_common.c
 
     # Synopsys dwc3 controller
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/hcd_dwc3.c
+
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/hcd_dwc3.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/dwc3_common.c
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/dwc3.c
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/dwc3_ll.c
 
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_cap.c

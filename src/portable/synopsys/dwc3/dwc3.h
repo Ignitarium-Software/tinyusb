@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include "socfpga_usb3_reg.h"
+#include "dwc3_type.h"
 #include "socfpga_defines.h"
 
 /**
