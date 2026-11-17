@@ -31,6 +31,8 @@
 
 #define MSC_BLOCK_SIZE (512)
 
+void hcd_device_close(uint8_t rhport, uint8_t dev_addr);
+
 static volatile int msc_mount_complete = 0;
 static scsi_inquiry_resp_t inquiry_resp;
 static volatile bool status_flag_cb = true;
@@ -97,7 +99,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
     tuh_bus_info_get(dev_addr, &dev_info);
     if( dev_info.rhport != SOCFPGA_USB2_OTG_PORT )
     {
-        hcd_dwc3_device_close(dev_info.rhport);
+        hcd_device_close(dev_info.rhport, 0);
     }
     PRINT("A MassStorage device is unmounted, address - %d\r\n", dev_addr);
 }

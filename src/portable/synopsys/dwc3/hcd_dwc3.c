@@ -31,16 +31,23 @@
 #include "host/hcd.h"
 #include "host/usbh.h"
 #include "dwc3_common.h"
+#include "xhci_api.h"
 
 //--------------------------------------------------------------------+
 // Controller API
 //--------------------------------------------------------------------+
 
 // Initialize controller to host mode
-bool dwc3_init() {
+bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
-  printf("DWC3 Init start\r\n");
+  (void) rh_init;
+
+  if (rhport == 1)
+    return true;
+
   dwc3_gbl_regs_t* dwc3 = (dwc3_gbl_regs_t*) (uintptr_t) _dwc3_controller[0].reg_base;
+
+  dwc3_mcu_init(rhport);
 
   const dwc3_ghwparams0_t ghwparams0 = {.value = dwc3->ghwparams0.value};
   const dwc3_ghwparams1_t ghwparams1 = {.value = dwc3->ghwparams1.value};
@@ -134,6 +141,12 @@ bool dwc3_init() {
     default:
       ERROR("Unable to setup DWC3 in host mode");
       return false;
+  }
+
+  if (xhci_init() == false)
+  {
+    ERROR("xHCI init failed !!!");
+    return false;
   }
 
   return true;

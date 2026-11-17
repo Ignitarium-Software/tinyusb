@@ -34,6 +34,9 @@ extern "C" {
 #if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
   #define SOCFPGA_USB3_REG_BASE     (0x1100C100U)
   #define OTG_HS_IRQn               126 // IRQ num for USB1 = 126
+  #include "socfpga_interrupt.h"
+  #include "socfpga_interrupt_priority.h"
+  #include "socfpga_rst_mngr.h"
 #else
   #error "Unsupported MCUs"
 #endif
@@ -43,6 +46,17 @@ extern "C" {
 static const dwc3_controller_t _dwc3_controller[] = {
     { .reg_base = SOCFPGA_USB3_REG_BASE, .irqnum = OTG_HS_IRQn, },
 };
+
+//--------------------------------------------------------------------+
+// Controller bring-up
+//--------------------------------------------------------------------+
+TU_ATTR_ALWAYS_INLINE static inline bool dwc3_mcu_init(uint8_t rhport) {
+  (void) rhport;
+  if (rstmgr_deassert_reset(_dwc3_controller[0].irqnum) != 0) {
+    return false;
+  }
+  return true;
+} 
 
 #ifdef __cplusplus
 }

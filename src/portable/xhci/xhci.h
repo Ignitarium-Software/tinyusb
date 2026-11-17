@@ -355,6 +355,6 @@ void start_xhci_controller(void);
  *  true on successful initialization
  *  false incase of failure
  */
-bool xhci_init(struct xhci_data *xhci);
+bool xhci_init();
 
 #endif  /*__XHCI_H__ */
