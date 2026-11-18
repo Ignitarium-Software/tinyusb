@@ -603,6 +603,23 @@
   #define CFG_TUH_MEM_DCACHE_LINE_SIZE CFG_TUSB_MEM_DCACHE_LINE_SIZE
 #endif
 
+// Multiple host controller drivers (HCD) in one image. When enabled, the standard hcd_* API is
+// provided by host/hcd_multi.c, which dispatches per rhport through the application/BSP table
+// tuh_hcd_drivers[CFG_TUH_HCD_MULTI_COUNT]. Each driver is compiled with host/hcd_rename.h,
+// see that header for details.
+#ifndef CFG_TUH_HCD_MULTI
+  #define CFG_TUH_HCD_MULTI 0
+#endif
+
+#if CFG_TUH_HCD_MULTI
+  // number of entries in tuh_hcd_drivers[], indexed by rhport (0 .. CFG_TUH_HCD_MULTI_COUNT-1)
+  #ifndef CFG_TUH_HCD_MULTI_COUNT
+    #error "CFG_TUH_HCD_MULTI requires CFG_TUH_HCD_MULTI_COUNT (number of rhport entries in tuh_hcd_drivers[])"
+  #elif CFG_TUH_HCD_MULTI_COUNT < 2
+    #error "CFG_TUH_HCD_MULTI_COUNT must be at least 2"
+  #endif
+#endif
+
 //------------- CLASS -------------//
 
 #ifndef CFG_TUH_HUB
