@@ -47,7 +47,7 @@ void usb_task(void *arg)
         .role = TUSB_ROLE_HOST,
         .speed = TUSB_SPEED_AUTO
     };
-#if 0
+
     /*initialize host stack for usb otg HS port*/
     if (!tusb_init(USB_OTG_PORT, &host_init))
     {
@@ -58,7 +58,6 @@ void usb_task(void *arg)
     {
         PRINT("USB OTG port initialized successfully");
     }
-#endif
 
    /*initialize host stack for usb3 SS port*/
     if (!tusb_init(USB3_SS_PORT, &host_init))
@@ -78,6 +77,7 @@ void usb_task(void *arg)
             PRINT("USB3.1 port initialized successfully");
         }
     }
+
     while (1)
     {
         tuh_task();

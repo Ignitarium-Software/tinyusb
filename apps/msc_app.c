@@ -27,7 +27,6 @@
 #include "tusb.h"
 #include "osal_log.h"
 #include "socfpga_cache.h"
-#include "hcd_dwc3.h"
 
 #define MSC_BLOCK_SIZE (512)
 

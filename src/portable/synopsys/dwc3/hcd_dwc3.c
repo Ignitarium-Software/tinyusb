@@ -67,8 +67,6 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
       break;
   }
 
-  printf("HWPARAMS : %x, %x, %x\r\n", ghwparams0.value,  ghwparams1.value, ghwparams3.value);
-
   switch (ghwparams3.ghwparams3_3_2) {
     case DWC3_HS_PHY_UTMI:
     case DWC3_HS_PHY_ULPI:

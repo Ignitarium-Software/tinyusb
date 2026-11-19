@@ -626,6 +626,7 @@
   #define TUP_USBIP_DWC2
   #define TUP_USBIP_DWC3
   #define TUP_USBIP_XHCI
+  #define TUP_USBIP_DWC2_SOCFPGA
   #define CFG_TUSB_MEM_DCACHE_LINE_SIZE_DEFAULT   64
 
 #endif

@@ -52,19 +52,18 @@ target_include_directories(agilex5-tinyusb PUBLIC
   ${FREERTOS_TOP_DIR}/tinyusb/src/class/msc
   ${FREERTOS_TOP_DIR}/tinyusb/src/common
   ${FREERTOS_TOP_DIR}/tinyusb/apps/
-  ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc2/
-  ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc3/
   ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc3/
+  ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc2/
   ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci
   )
 
 # Add TinyUSB target and port source
-  tinyusb_target_add(agilex5-tinyusb)
+tinyusb_target_add(agilex5-tinyusb)
 
 set(SOCFPGA_DWC2_SRCS
     # Synopsys dwc2 controller
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc2/hcd_dwc2.c
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/socfpga/dwc2/dwc2_common.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc2/hcd_dwc2.c
+    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c
     )
 
 set(SOCFPGA_DWC3_SRCS
