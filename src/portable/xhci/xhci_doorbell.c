@@ -8,33 +8,30 @@
  */
 
 #include "xhci_doorbell.h"
-#include "socfpga_defines.h"
 
 void ring_xhci_host_db(void)
 {
     xhci_oper_reg_params_t op_regs;
+    volatile xhci_db_t *doorbells;
 
     op_regs = get_xhci_op_registers();
-    WR_REG32((op_regs.xhci_db_base + USB3_DB), XHCI_COMMAND_DOORBELL);
+    doorbells = (volatile xhci_db_t *)(uintptr_t) op_regs.xhci_db_base;
+    doorbells[0].value = XHCI_COMMAND_DOORBELL;
 }
 void ring_xhci_ep0_db(xhci_oper_reg_params_t *op_regs)
 {
-    uint64_t db_reg;
+    volatile xhci_db_t *doorbells;
     uint32_t slot_id = 1U;
 
-    db_reg = (op_regs->xhci_db_base + USB3_DB) +
-            (XHCI_DB_REG_SIZE * (uint64_t) slot_id);
-
-    WR_REG32((uint32_t) db_reg, XHCI_DB_EP0_TARGET);
+    doorbells = (volatile xhci_db_t *)(uintptr_t) op_regs->xhci_db_base;
+    doorbells[slot_id].value = XHCI_DB_EP0_TARGET;
 }
 
 void ring_xhci_ep_doorbell(xhci_oper_reg_params_t *op_regs, uint8_t db_target)
 {
-    uint64_t db_reg;
+    volatile xhci_db_t *doorbells;
     uint32_t slot_id = 1U;
 
-    db_reg = (op_regs->xhci_db_base + USB3_DB) +
-            (XHCI_DB_REG_SIZE * (uint64_t) slot_id);
-
-    WR_REG32((uint32_t) db_reg, db_target);
+    doorbells = (volatile xhci_db_t *)(uintptr_t) op_regs->xhci_db_base;
+    doorbells[slot_id].value = db_target;
 }

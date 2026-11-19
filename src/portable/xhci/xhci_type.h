@@ -2899,25 +2899,25 @@ TU_VERIFY_STATIC(sizeof(xhci_rsvd_reg_t) == sizeof(uint32_t), "incorrect size");
 
 /* xHCI capability and operational register map. */
 typedef struct TU_ATTR_PACKED {
-  xhci_caplength_t  caplength;       // 0x0000
-  xhci_hcsparams1_t hcsparams1;      // 0x0004
-  xhci_hcsparams2_t hcsparams2;      // 0x0008
-  xhci_hcsparams3_t hcsparams3;      // 0x000c
-  xhci_hccparams1_t hccparams1;      // 0x0010
-  xhci_dboff_t      dboff;           // 0x0014
-  xhci_rtsoff_t     rtsoff;          // 0x0018
-  xhci_hccparams2_t hccparams2;      // 0x001c
-  xhci_usbcmd_t     usbcmd;          // 0x0020
-  xhci_usbsts_t     usbsts;          // 0x0024
-  xhci_pagesize_t   pagesize;        // 0x0028
+  volatile xhci_caplength_t  caplength;       // 0x0000
+  volatile xhci_hcsparams1_t hcsparams1;      // 0x0004
+  volatile xhci_hcsparams2_t hcsparams2;      // 0x0008
+  volatile xhci_hcsparams3_t hcsparams3;      // 0x000c
+  volatile xhci_hccparams1_t hccparams1;      // 0x0010
+  volatile xhci_dboff_t      dboff;           // 0x0014
+  volatile xhci_rtsoff_t     rtsoff;          // 0x0018
+  volatile xhci_hccparams2_t hccparams2;      // 0x001c
+  volatile xhci_usbcmd_t     usbcmd;          // 0x0020
+  volatile xhci_usbsts_t     usbsts;          // 0x0024
+  volatile xhci_pagesize_t   pagesize;        // 0x0028
   uint32_t          reserved_2c_30[2]; // 0x002c..0x0030
-  xhci_dnctrl_t     dnctrl;          // 0x0034
-  xhci_crcr_lo_t    crcr_lo;         // 0x0038
-  xhci_crcr_hi_t    crcr_hi;         // 0x003c
+  volatile xhci_dnctrl_t     dnctrl;          // 0x0034
+  volatile xhci_crcr_lo_t    crcr_lo;         // 0x0038
+  volatile xhci_crcr_hi_t    crcr_hi;         // 0x003c
   uint32_t          reserved_40_4c[4]; // 0x0040..0x004c
-  xhci_dcbaap_lo_t  dcbaap_lo;       // 0x0050
-  xhci_dcbaap_hi_t  dcbaap_hi;       // 0x0054
-  xhci_config_t     config;          // 0x0058
+  volatile xhci_dcbaap_lo_t  dcbaap_lo;       // 0x0050
+  volatile xhci_dcbaap_hi_t  dcbaap_hi;       // 0x0054
+  volatile xhci_config_t     config;          // 0x0058
 } xhci_regs_t;
 TU_VERIFY_STATIC(offsetof(xhci_regs_t, caplength) == 0x0000, "incorrect register offset");
 TU_VERIFY_STATIC(offsetof(xhci_regs_t, hcsparams1) == 0x0004, "incorrect register offset");
@@ -2937,6 +2937,27 @@ TU_VERIFY_STATIC(offsetof(xhci_regs_t, dcbaap_lo) == 0x0050, "incorrect register
 TU_VERIFY_STATIC(offsetof(xhci_regs_t, dcbaap_hi) == 0x0054, "incorrect register offset");
 TU_VERIFY_STATIC(offsetof(xhci_regs_t, config) == 0x0058, "incorrect register offset");
 TU_VERIFY_STATIC(sizeof(xhci_regs_t) == 0x5c, "incorrect register map size");
+
+/* xHCI interrupter runtime register map. */
+typedef struct TU_ATTR_PACKED {
+  uint32_t reserved_00_1c[8]; // 0x0000..0x001c
+  xhci_iman_t iman;           // 0x0020
+  xhci_imod_t imod;           // 0x0024
+  xhci_erstsz_t erstsz;       // 0x0028
+  uint32_t reserved_2c;       // 0x002c
+  xhci_erstba_lo_t erstba_lo; // 0x0030
+  xhci_erstba_hi_t erstba_hi; // 0x0034
+  xhci_erdp_lo_t erdp_lo;     // 0x0038
+  xhci_erdp_hi_t erdp_hi;     // 0x003c
+} xhci_runtime_regs_t;
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, iman) == 0x0020, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, imod) == 0x0024, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, erstsz) == 0x0028, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, erstba_lo) == 0x0030, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, erstba_hi) == 0x0034, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, erdp_lo) == 0x0038, "incorrect register offset");
+TU_VERIFY_STATIC(offsetof(xhci_runtime_regs_t, erdp_hi) == 0x003c, "incorrect register offset");
+TU_VERIFY_STATIC(sizeof(xhci_runtime_regs_t) == 0x40, "incorrect register map size");
 
 #ifdef __cplusplus
 }

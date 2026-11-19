@@ -9,9 +9,10 @@
 
 #include <stdlib.h>
 #include "socfpga_cache.h"
-#include "socfpga_defines.h"
 #include "osal_log.h"
 #include "xhci.h"
+
+#define XHCI_REG_BASE (0x11000000)
 
 /*************************************************************************************************/
 /*                                  xHCI Rings                                                   */
@@ -36,7 +37,8 @@
 
 int xhci_crcr_init(xcr_command_ring_t *xcr_ring)
 {
-    uint32_t crcr_write_val;
+    volatile xhci_regs_t *xhci = (volatile xhci_regs_t *)(uintptr_t) XHCI_REG_BASE;
+
     int ret;
 
     xcr_ring->xcr_dequeue_ptr = allocate_ring_segment(64, XHCI_CR_TRB_LEN);
@@ -59,12 +61,11 @@ int xhci_crcr_init(xcr_command_ring_t *xcr_ring)
     xcr_ring->xcr_enqueue_ptr = xcr_ring->xcr_dequeue_ptr;
     xcr_ring->xcr_ccs_flag = XHCI_CR_CCS_FLAG;
 
-    crcr_write_val = (((uint32_t)(uintptr_t) xcr_ring->xcr_dequeue_ptr) &
-            USB3_CRCR_LO_CMD_RING_PNTR_MASK);
-    crcr_write_val |= (xcr_ring->xcr_ccs_flag);
-
-    WR_REG32((USBBASE + USB3_CRCR_LO), crcr_write_val);
-    INFO("Command Ring Register updated");
+    xhci->crcr_lo.value =
+            (((uint32_t)(uintptr_t)xcr_ring->xcr_dequeue_ptr) &
+             USB3_CRCR_LO_CMD_RING_PNTR_MASK) |
+            (uint32_t) xcr_ring->xcr_ccs_flag;
+    xhci->crcr_hi.value = (uint32_t)((uintptr_t) xcr_ring->xcr_dequeue_ptr >> 32);
 
     return 0;
 }
@@ -76,17 +77,17 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     uint64_t erdp_reg_val;
     uint64_t rt_base_addr;
 
-    uint32_t reg_val;
+    volatile xhci_runtime_regs_t *runtime;
     xer_event_ring_t *xer_ring;
 
     xer_ring = &xhci_ptr->xer_ring;
 
-    rt_base_addr  = xhci_ptr->op_regs.xhci_runtime_base;
+    rt_base_addr = xhci_ptr->op_regs.xhci_runtime_base;
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) rt_base_addr;
 
-    reg_val = RD_REG32((rt_base_addr + USB3_ERSTSZ));
-    reg_val &= ~(USB3_ERSTSZ_ERS_TABLE_SIZE_MASK);
-    reg_val |= XHCI_EVENT_RING_TABLE_SZ;
-    WR_REG32((rt_base_addr + USB3_ERSTSZ), reg_val);
+    runtime->erstsz.value =
+            (runtime->erstsz.value & ~(USB3_ERSTSZ_ERS_TABLE_SIZE_MASK)) |
+            XHCI_EVENT_RING_TABLE_SZ;
 
     xer_ring->erst_ptr = (xhci_erst_entry_t *)(uintptr_t) pvPortAlignedAlloc(64,
             1U * sizeof(xhci_erst_entry_t));
@@ -140,15 +141,16 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     xer_ring->erst_ptr->rsvd = 0U;
 
     ring_addr = (uint64_t)xer_ring->erst_ptr;
-    reg_val = RD_REG32((rt_base_addr + USB3_ERSTBA_LO));
-    reg_val |= (uint32_t) (ring_addr & ~(0x3fUL));
-    WR_REG64((rt_base_addr + USB3_ERSTBA_LO), reg_val);
+    runtime->erstba_lo.value =
+            (uint32_t) (ring_addr & ~(0x3fUL));
+    runtime->erstba_hi.value = (uint32_t) (ring_addr >> 32);
 
     ring_addr = (uint64_t) (xer_ring->xer_enqueue_ptr);
-    erdp_reg_val = RD_REG32((rt_base_addr + USB3_ERDP_LO));
-    erdp_reg_val &= ~(USB3_ERDP_LO_ERD_PNTR_MASK);
+    erdp_reg_val = runtime->erdp_lo.value &
+            ~(uint64_t) USB3_ERDP_LO_ERD_PNTR_MASK;
     erdp_reg_val |= ring_addr;
-    WR_REG64((rt_base_addr + USB3_ERDP_LO), erdp_reg_val);
+    runtime->erdp_lo.value = (uint32_t) erdp_reg_val;
+    runtime->erdp_hi.value = (uint32_t) (ring_addr >> 32);
 
     cache_force_write_back((void *)(uintptr_t) xer_ring->erst_ptr,
             sizeof(xhci_erst_entry_t));

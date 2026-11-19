@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include "xhci_type.h"
 #include "xhci_context.h"
 #include "xhci_rings.h"
 

@@ -18,35 +18,39 @@
  */
 int get_xhc_cap_params(struct xhci_data *xhci)
 {
-    uint32_t caplength = RD_REG32(USBBASE + USB3_CAPLENGTH);
-    uint32_t dboff = RD_REG32(USBBASE + USB3_DBOFF);
-    uint32_t rtsoff = RD_REG32(USBBASE + USB3_RTSOFF);
+    volatile xhci_regs_t *regs =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
 
     xhci->xhc_cap_ptr = (xhci_cap_reg_t *)USBBASE;
 
     DEBUG("CAPLENGTH : %x",
-            (caplength & USB3_CAPLENGTH_CAPLENGTH_MASK));
+            (regs->caplength.value & USB3_CAPLENGTH_CAPLENGTH_MASK));
     DEBUG("HCSPARAMS1 : %x",
-            RD_REG32(USBBASE + USB3_HCSPARAMS1));
+            regs->hcsparams1.value);
     DEBUG("HCSPARAMS2 : %x",
-            RD_REG32(USBBASE + USB3_HCSPARAMS2));
+            regs->hcsparams2.value);
     DEBUG("HCSPARAMS3 : %x",
-            RD_REG32(USBBASE + USB3_HCSPARAMS3));
+            regs->hcsparams3.value);
     DEBUG("HCCPARAMS1 : %x",
-            RD_REG32(USBBASE + USB3_HCCPARAMS1));
+            regs->hccparams1.value);
     DEBUG("DBOFF : %x",
-            (dboff & USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK));
+            (regs->dboff.value &
+             USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK));
     DEBUG("RTOFF : %x",
-            (rtsoff & USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK));
+            (regs->rtsoff.value &
+             USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK));
     DEBUG("HCCPARAMS2 : %x",
-            RD_REG32(USBBASE + USB3_HCCPARAMS2));
+            regs->hccparams2.value);
 
     xhci->op_regs.xhci_op_base = (uint64_t)USBBASE +
-            (uint64_t)(caplength & USB3_CAPLENGTH_CAPLENGTH_MASK);
+            (uint64_t)(regs->caplength.value &
+                       USB3_CAPLENGTH_CAPLENGTH_MASK);
     xhci->op_regs.xhci_runtime_base = (uint64_t)USBBASE +
-            (uint64_t)(rtsoff & USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK);
+            (uint64_t)(regs->rtsoff.value &
+                       USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK);
     xhci->op_regs.xhci_db_base = (uint64_t)USBBASE +
-            (uint64_t)(dboff & USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK);
+            (uint64_t)(regs->dboff.value &
+                       USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK);
 
     DEBUG("Operational base : %lx ",
             xhci->op_regs.xhci_op_base);
@@ -61,14 +65,19 @@ int get_xhc_cap_params(struct xhci_data *xhci)
 xhci_oper_reg_params_t get_xhci_op_registers(void)
 {
     xhci_oper_reg_params_t op_reg = {0};
-    uint32_t cap = RD_REG32(USBBASE + offsetof(xhci_cap_reg_t, caplength));
-    uint32_t dboff = RD_REG32(USBBASE + offsetof(xhci_cap_reg_t, dboff));
-    uint32_t rtsoff = RD_REG32(USBBASE + offsetof(xhci_cap_reg_t, rtsoff));
+    volatile xhci_regs_t *regs =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
     /* CAPLENGTH[7:0] */
-    op_reg.xhci_op_base = (uint64_t)USBBASE + (uint64_t)(cap & 0xFFU);
+    op_reg.xhci_op_base = (uint64_t)USBBASE +
+            (uint64_t)(regs->caplength.value &
+                       USB3_CAPLENGTH_CAPLENGTH_MASK);
     /* DBOFF[31:2] */
-    op_reg.xhci_db_base = (uint64_t)USBBASE + (uint64_t)(dboff & ~0x3U);
+    op_reg.xhci_db_base = (uint64_t)USBBASE +
+            (uint64_t)(regs->dboff.value &
+                       USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK);
     /* RSTOFF[31:5] */
-    op_reg.xhci_runtime_base = (uint64_t)USBBASE + (uint64_t)(rtsoff & ~0x1FU);
+    op_reg.xhci_runtime_base = (uint64_t)USBBASE +
+            (uint64_t)(regs->rtsoff.value &
+                       USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK);
     return op_reg;
 }

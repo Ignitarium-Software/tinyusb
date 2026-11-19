@@ -9,11 +9,11 @@
 
 #include <stdio.h>
 #include "xhci_events.h"
-#include "socfpga_defines.h"
 #include "socfpga_cache.h"
 #include "osal_log.h"
 
-static void erdp_register_update();
+static void erdp_register_update(xer_event_ring_t *xer_ring,
+        volatile xhci_runtime_regs_t *runtime);
 
 void display_event_trbs(struct xhci_data *xhci)
 {
@@ -33,18 +33,14 @@ void display_event_trbs(struct xhci_data *xhci)
 
 uint8_t get_xhc_port_speed(uint8_t rhport)
 {
-    uint32_t portsc_reg_val, portsc_reg;
-    uint8_t port_speed;
-
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
-    portsc_reg = (uint32_t) ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
+    volatile xhci_portsc_20_t *portsc =
+            (volatile xhci_portsc_20_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
 
-    portsc_reg_val = RD_REG32(portsc_reg);
-    port_speed = (uint8_t) ((portsc_reg_val & USB3_PORTSC_20_PORTSPEED_MASK) >>
+    return (uint8_t) ((portsc->value & USB3_PORTSC_20_PORTSPEED_MASK) >>
             USB3_PORTSC_20_PORTSPEED_POS);
-
-    return port_speed;
 }
 
 /*
@@ -53,16 +49,14 @@ uint8_t get_xhc_port_speed(uint8_t rhport)
  */
 bool xhci_port_status(uint8_t rhport)
 {
-    uint32_t reg_val;
-    uint32_t portsc_reg;
-
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
-    portsc_reg = (uint32_t) ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
+    volatile xhci_portsc_20_t *portsc =
+            (volatile xhci_portsc_20_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
 
     /*Bit 0 gives attach/detach status */
-    reg_val = RD_REG32(portsc_reg);
-    if ((reg_val & 1U) != 0U)
+    if ((portsc->value & USB3_PORTSC_20_CCS_MASK) != 0U)
     {
         return true;
     }
@@ -72,29 +66,28 @@ bool xhci_port_status(uint8_t rhport)
 /* reset the RH port */
 void reset_xhci_port(uint8_t rhport)
 {
-    uint32_t reg_val;
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
-    uint32_t portsc_reg = (uint32_t) ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
+    volatile xhci_portsc_20_t *portsc =
+            (volatile xhci_portsc_20_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
 
-    reg_val = RD_REG32(portsc_reg);
-    reg_val |= (USB3_PORTSC_20_PR_MASK);
-    WR_REG32(portsc_reg, reg_val);
+    portsc->value |= USB3_PORTSC_20_PR_MASK;
     INFO("xHCI port reset initiated on port : %d", rhport);
 }
 
 bool is_xhci_port_reset_end(uint8_t rhport)
 {
-    volatile uint32_t reg_val, portsc_reg;
+    volatile xhci_portsc_20_t *portsc;
     uint32_t loop = 100U;
 
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
-    portsc_reg = ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
+    portsc = (volatile xhci_portsc_20_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
     do
     {
-        reg_val = RD_REG32(portsc_reg);
-        if ((reg_val & (1U << 4)) == 0U)
+        if ((portsc->value & USB3_PORTSC_20_PR_MASK) == 0U)
         {
             break;
         }
@@ -116,13 +109,17 @@ bool is_xhci_port_reset_end(uint8_t rhport)
 xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr)
 {
     uint64_t erdp_addr;
+    volatile xhci_runtime_regs_t *runtime;
     xhci_event_trb_type_t trb_id;
     xhci_event_trb_t event = {0};
 
     /* decrement the event ring trb count */
     xhci_ptr->xer_ring.trb_count -= 1U;
 
-    erdp_addr = RD_REG32(ERDP);
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t)
+            xhci_ptr->op_regs.xhci_runtime_base;
+    erdp_addr = ((uint64_t) runtime->erdp_hi.value << 32) |
+            runtime->erdp_lo.value;
     erdp_addr &= 0xfffffff0UL;
 
     cache_force_invalidate((void *)erdp_addr, sizeof(xhci_trb_t));
@@ -154,11 +151,12 @@ xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr)
         /* error TRB type */
         configASSERT(trb_id >= 0);
     }
-    erdp_register_update(&xhci_ptr->xer_ring);
+    erdp_register_update(&xhci_ptr->xer_ring, runtime);
     return event;
 }
 
-static void erdp_register_update(xer_event_ring_t *xer_ring)
+static void erdp_register_update(xer_event_ring_t *xer_ring,
+        volatile xhci_runtime_regs_t *runtime)
 {
     uint32_t trb_count;
     uint64_t erdp_addr;
@@ -167,7 +165,6 @@ static void erdp_register_update(xer_event_ring_t *xer_ring)
 
     if (trb_count == 0U)
     {
-        erdp_addr = RD_REG32(ERDP);
         erdp_addr = (uint64_t)xer_ring->xer_enqueue_ptr;
         /* EHB flag */
         erdp_addr |= 8UL;
@@ -176,28 +173,32 @@ static void erdp_register_update(xer_event_ring_t *xer_ring)
     }
     else
     {
-        erdp_addr = RD_REG32(ERDP);
+        erdp_addr = ((uint64_t) runtime->erdp_hi.value << 32) |
+                runtime->erdp_lo.value;
         erdp_addr += 0x10U;
     }
-    WR_REG64(ERDP, erdp_addr);
+    runtime->erdp_lo.value = (uint32_t) erdp_addr;
+    runtime->erdp_hi.value = (uint32_t) (erdp_addr >> 32);
 }
 
 xhci_psceg_params_t handle_psceg_event(xpsc_event_t psc_event)
 {
-    uint32_t portsc_reg, portsc_register, temp = 0U;
+    uint32_t temp = 0U;
     xhci_psceg_params_t port_params = { 0 };
+    volatile xhci_portsc_20_t *portsc;
 
     uint8_t rhport = (uint8_t) ((psc_event.buf & 0xff000000UL) >> 24);
 
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
-    portsc_register = (uint32_t) ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
-    portsc_reg = RD_REG32(portsc_register);
+    portsc = (volatile xhci_portsc_20_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
 
-    if ((portsc_reg & USB3_PORTSC_20_CSC_MASK) > 0U)
+    if ((portsc->value & USB3_PORTSC_20_CSC_MASK) != 0U)
     {
         /* device connected to RH PORT */
-        if ((portsc_reg & USB3_PORTSC_20_CCS_MASK) == 1U)
+        if ((portsc->value & USB3_PORTSC_20_CCS_MASK) ==
+                USB3_PORTSC_20_CCS_MASK)
         {
             /* acknowledge the status bit change */
             temp |= (USB3_PORTSC_20_CSC_MASK);
@@ -213,33 +214,30 @@ xhci_psceg_params_t handle_psceg_event(xpsc_event_t psc_event)
             port_params.dev_attach_flag = -1;
         }
     }
-    if ((portsc_reg & USB3_PORTSC_20_PRC_MASK) > 0U)
+    if ((portsc->value & USB3_PORTSC_20_PRC_MASK) != 0U)
     {
         /*Port Reset Event */
         temp |= USB3_PORTSC_20_PRC_MASK;
     }
-    if ((portsc_reg & USB3_PORTSC_30_WRC_MASK) > 0U)
+    if ((portsc->value & USB3_PORTSC_30_WRC_MASK) != 0U)
     {
         /*Warm PR Event */
         temp |= USB3_PORTSC_30_WRC_MASK;
     }
 
-    portsc_reg &= ~PORTSC_CLEAR_FLAGS;
-    portsc_reg |= temp;
-    WR_REG32(portsc_register, portsc_reg);
+    portsc->value = (portsc->value & ~PORTSC_CLEAR_FLAGS) | temp;
 
     return port_params;
 }
 
 void xhci_warm_reset(uint8_t rhport)
 {
-    uint32_t reg_val, portsc_register;
     xhci_oper_reg_params_t op_reg = get_xhci_op_registers();
+    volatile xhci_portsc_30_t *portsc;
 
-    portsc_register = (uint32_t) ((op_reg.xhci_op_base + PORTSC_REG_OFFSET +
-            (0x10U * ((uint64_t) rhport - 1UL))) & 0x00000000ffffffffUL);
+    portsc = (volatile xhci_portsc_30_t *)(uintptr_t)
+            (op_reg.xhci_op_base + PORTSC_REG_OFFSET +
+             (0x10U * ((uint64_t) rhport - 1UL)));
 
-    reg_val = RD_REG32(portsc_register);
-    reg_val |= USB3_PORTSC_30_WPR_MASK;
-    WR_REG32(portsc_register, reg_val);
+    portsc->value |= USB3_PORTSC_30_WPR_MASK;
 }

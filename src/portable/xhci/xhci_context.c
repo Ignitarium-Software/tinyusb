@@ -45,7 +45,6 @@
 
 #include "xhci.h"
 #include "socfpga_cache.h"
-#include "socfpga_defines.h"
 #include "xhci_endpoints.h"
 #include "xhci_context.h"
 #include "xhci_events.h"
@@ -340,7 +339,12 @@ int alloc_dcbaa(struct xhci_data *xhci_ptr)
         xhci_ptr->dcbaa->dev_context_ptrs[i] = 0UL;
     }
 
-    WR_REG64((USBBASE + USB3_DCBAAP_LO), (uint64_t)xhci_ptr->dcbaa);
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+    const uint64_t dcbaa = (uint64_t)(uintptr_t) xhci_ptr->dcbaa;
+
+    xhci->dcbaap_lo.value = (uint32_t) dcbaa;
+    xhci->dcbaap_hi.value = (uint32_t) (dcbaa >> 32);
     DEBUG("xHCI DCBAA register updated");
 
     return 0;

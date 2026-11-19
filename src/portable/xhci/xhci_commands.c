@@ -10,7 +10,6 @@
 #include "xhci_commands.h"
 #include "xhci_doorbell.h"
 #include "socfpga_cache.h"
-#include "socfpga_defines.h"
 #include "osal_log.h"
 
 xhci_trb_t *get_cmdring_enq_ptr(xcr_command_ring_t *cmd_ring)
@@ -68,17 +67,18 @@ void set_device_address(struct xhci_data *xhci_ptr)
 
 void reset_command_ring(xcr_command_ring_t *xcr_ring)
 {
-    uint32_t crcr_reg;
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
     uint32_t crcr_addr;
 
     /* first stop the command ring operation */
-    crcr_reg = RD_REG32((USBBASE + USB3_CRCR_LO));
-    crcr_reg |= (0x2U);
-    WR_REG32((USBBASE + USB3_CRCR_LO), crcr_reg);
+    xhci->crcr_lo.cs = 1U;
 
-    crcr_addr = ((uint32_t)(uintptr_t) (&xcr_ring->xcr_dequeue_ptr) &
+    crcr_addr = ((uint32_t)(uintptr_t) xcr_ring->xcr_dequeue_ptr &
             0xffffffffU);
-    WR_REG32((USBBASE + USB3_CRCR_LO), crcr_addr);
+    xhci->crcr_lo.value = crcr_addr;
+    xhci->crcr_hi.value =
+            (uint32_t) ((uintptr_t) xcr_ring->xcr_dequeue_ptr >> 32);
 }
 
 void enable_slot_command(xcr_command_ring_t *xcr_ring)
