@@ -35,6 +35,10 @@
  extern "C" {
 #endif
 
+#if defined(TUH_HCD_NAME) && !CFG_TUH_HCD_MULTI
+  #error "TUH_HCD_NAME / host/hcd_rename.h used while CFG_TUH_HCD_MULTI == 0"
+#endif
+
 //--------------------------------------------------------------------+
 // Configuration
 //--------------------------------------------------------------------+
@@ -175,8 +179,95 @@ bool hcd_setup_send(uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[8]
 // clear stall, data toggle is also reset to DATA0
 bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr);
 
-// parse xHCI configuration descriptor
+// [optional] configure endpoints from the full configuration descriptor before SET_CONFIGURATION
+// completes (needed by xHCI). Default (weak, in usbh.c) returns true.
 bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t rhport);
+
+//--------------------------------------------------------------------+
+// Multiple HCD support (CFG_TUH_HCD_MULTI), see host/hcd_rename.h
+//--------------------------------------------------------------------+
+#if CFG_TUH_HCD_MULTI
+
+typedef struct {
+  const char* name;                                                     // "dwc2", "dwc3" (debug/logging)
+  bool     (*configure)(uint8_t, uint32_t, const void*);                // optional
+  bool     (*init)(uint8_t, const tusb_rhport_init_t*);
+  bool     (*deinit)(uint8_t);                                          // optional
+  void     (*int_handler)(uint8_t, bool);
+  void     (*int_enable)(uint8_t);
+  void     (*int_disable)(uint8_t);
+  uint32_t (*frame_number)(uint8_t);                                    // optional
+  bool     (*port_connect_status)(uint8_t);
+  void     (*port_reset)(uint8_t);
+  void     (*port_reset_end)(uint8_t);
+  tusb_speed_t (*port_speed_get)(uint8_t);
+  void     (*device_close)(uint8_t, uint8_t);
+  bool     (*edpt_open)(uint8_t, uint8_t, tusb_desc_endpoint_t const*);
+  bool     (*edpt_close)(uint8_t, uint8_t, uint8_t);                    // optional
+  bool     (*edpt_xfer)(uint8_t, uint8_t, uint8_t, uint8_t*, uint32_t);
+  bool     (*edpt_abort_xfer)(uint8_t, uint8_t, uint8_t);               // optional
+  bool     (*setup_send)(uint8_t, uint8_t, uint8_t const[8]);
+  bool     (*edpt_clear_stall)(uint8_t, uint8_t, uint8_t);              // optional
+  bool     (*parse_full_conf_descriptor)(tusb_desc_configuration_t*, uint8_t); // optional
+} hcd_driver_t;
+
+// Per-rhport driver table, provided by the application/BSP (NULL for unused rhports)
+extern hcd_driver_t const* const tuh_hcd_drivers[CFG_TUH_HCD_MULTI_COUNT];
+
+#define _TUH_HCD_FN(_n, _o)  hcd_##_n##_##_o
+
+// Prototypes of the renamed API of driver _n. Optional ops are weak: unimplemented ones resolve to NULL.
+#define TUH_HCD_DRIVER_DECLARE(_n) \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, configure)(uint8_t rhport, uint32_t cfg_id, const void* cfg_param); \
+  bool _TUH_HCD_FN(_n, init)(uint8_t rhport, const tusb_rhport_init_t* rh_init); \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, deinit)(uint8_t rhport); \
+  void _TUH_HCD_FN(_n, int_handler)(uint8_t rhport, bool in_isr); \
+  void _TUH_HCD_FN(_n, int_enable)(uint8_t rhport); \
+  void _TUH_HCD_FN(_n, int_disable)(uint8_t rhport); \
+  TU_ATTR_WEAK uint32_t _TUH_HCD_FN(_n, frame_number)(uint8_t rhport); \
+  bool _TUH_HCD_FN(_n, port_connect_status)(uint8_t rhport); \
+  void _TUH_HCD_FN(_n, port_reset)(uint8_t rhport); \
+  void _TUH_HCD_FN(_n, port_reset_end)(uint8_t rhport); \
+  tusb_speed_t _TUH_HCD_FN(_n, port_speed_get)(uint8_t rhport); \
+  void _TUH_HCD_FN(_n, device_close)(uint8_t rhport, uint8_t dev_addr); \
+  bool _TUH_HCD_FN(_n, edpt_open)(uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t const* ep_desc); \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, edpt_close)(uint8_t rhport, uint8_t daddr, uint8_t ep_addr); \
+  bool _TUH_HCD_FN(_n, edpt_xfer)(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t* buffer, uint32_t buflen); \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, edpt_abort_xfer)(uint8_t rhport, uint8_t daddr, uint8_t ep_addr); \
+  bool _TUH_HCD_FN(_n, setup_send)(uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[8]); \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, edpt_clear_stall)(uint8_t rhport, uint8_t daddr, uint8_t ep_addr); \
+  TU_ATTR_WEAK bool _TUH_HCD_FN(_n, parse_full_conf_descriptor)(tusb_desc_configuration_t* desc_cfg, uint8_t rhport)
+
+// Defines `hcd_driver_t const hcd_<_n>_driver` with every op of driver _n (use in BSP/application only)
+#define TUH_HCD_DRIVER_DEFINE(_n) \
+  TUH_HCD_DRIVER_DECLARE(_n); \
+  hcd_driver_t const hcd_##_n##_driver = { \
+    .name                       = #_n, \
+    .configure                  = _TUH_HCD_FN(_n, configure), \
+    .init                       = _TUH_HCD_FN(_n, init), \
+    .deinit                     = _TUH_HCD_FN(_n, deinit), \
+    .int_handler                = _TUH_HCD_FN(_n, int_handler), \
+    .int_enable                 = _TUH_HCD_FN(_n, int_enable), \
+    .int_disable                = _TUH_HCD_FN(_n, int_disable), \
+    .frame_number               = _TUH_HCD_FN(_n, frame_number), \
+    .port_connect_status        = _TUH_HCD_FN(_n, port_connect_status), \
+    .port_reset                 = _TUH_HCD_FN(_n, port_reset), \
+    .port_reset_end             = _TUH_HCD_FN(_n, port_reset_end), \
+    .port_speed_get             = _TUH_HCD_FN(_n, port_speed_get), \
+    .device_close               = _TUH_HCD_FN(_n, device_close), \
+    .edpt_open                  = _TUH_HCD_FN(_n, edpt_open), \
+    .edpt_close                 = _TUH_HCD_FN(_n, edpt_close), \
+    .edpt_xfer                  = _TUH_HCD_FN(_n, edpt_xfer), \
+    .edpt_abort_xfer            = _TUH_HCD_FN(_n, edpt_abort_xfer), \
+    .setup_send                 = _TUH_HCD_FN(_n, setup_send), \
+    .edpt_clear_stall           = _TUH_HCD_FN(_n, edpt_clear_stall), \
+    .parse_full_conf_descriptor = _TUH_HCD_FN(_n, parse_full_conf_descriptor), \
+  }
+
+// Log every rhport entry and which optional ops are present (CFG_TUSB_DEBUG >= 2)
+void tuh_hcd_multi_log(void);
+
+#endif // CFG_TUH_HCD_MULTI
 
 //--------------------------------------------------------------------+
 // USBH implemented API

@@ -60,6 +60,13 @@ TU_ATTR_WEAK bool hcd_configure(uint8_t rhport, uint32_t cfg_id, const void* cfg
   return false;
 }
 
+// Optional: HCDs that must configure endpoint contexts from the whole configuration descriptor
+// (e.g. xHCI) override this. Others accept the configuration unchanged.
+TU_ATTR_WEAK bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t* desc_cfg, uint8_t rhport) {
+  (void) desc_cfg; (void) rhport;
+  return true;
+}
+
 TU_ATTR_WEAK void tuh_enum_descriptor_device_cb(uint8_t daddr, const tusb_desc_device_t *desc_device) {
   (void) daddr; (void) desc_device;
 }
