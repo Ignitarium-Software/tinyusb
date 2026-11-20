@@ -8,7 +8,7 @@
  */
 
 #include <stdlib.h>
-#include "socfpga_cache.h"
+#include "host/hcd.h"
 #include "osal_log.h"
 #include "xhci.h"
 
@@ -152,12 +152,12 @@ int init_xhc_event_ring(struct xhci_data *xhci_ptr)
     runtime->erdp_lo.value = (uint32_t) erdp_reg_val;
     runtime->erdp_hi.value = (uint32_t) (ring_addr >> 32);
 
-    cache_force_write_back((void *)(uintptr_t) xer_ring->erst_ptr,
+    hcd_dcache_clean(xer_ring->erst_ptr,
             sizeof(xhci_erst_entry_t));
-    cache_force_write_back((void *)(uintptr_t) xer_ring->xer_enqueue_ptr,
+    hcd_dcache_clean(xer_ring->xer_enqueue_ptr,
             XHCI_EVENT_RING_SEG_LENGTH * sizeof(xhci_trb_t));
 
-    INFO("Event Ring configured successfully");
+    TU_LOG3("Event Ring configured successfully");
     return 0;
 }
 
@@ -200,7 +200,7 @@ xhci_trb_t *allocate_ring_segment(int req_byte_align, int req_trb_len)
     ring_ctrl_flags |= ((uint32_t) LINK_TRB << 10);
     link_trb->control = ring_ctrl_flags;
 
-    cache_force_write_back(xtr, (size_t) req_trb_len * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xtr, (uint32_t) req_trb_len * sizeof(xhci_trb_t));
 
     return xtr;
 }
@@ -243,7 +243,7 @@ xhci_trb_t *get_next_trb_segment(xhci_trb_t *ptr, uint8_t *pcs_flag)
     link_ctrl |= (*pcs_flag);
 
     link_trb->control = link_ctrl;
-    cache_force_write_back((void *)(uintptr_t) link_trb, sizeof(xhci_trb_t));
+    hcd_dcache_clean(link_trb, sizeof(xhci_trb_t));
 
     if ((link_trb->control & 0x00000002U) != 0U)
     {

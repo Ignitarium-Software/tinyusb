@@ -9,24 +9,23 @@
 
 #include <stdio.h>
 #include "xhci_events.h"
-#include "socfpga_cache.h"
-#include "osal_log.h"
+#include "host/hcd.h"
 
 static void erdp_register_update(xer_event_ring_t *xer_ring,
         volatile xhci_runtime_regs_t *runtime);
 
 void display_event_trbs(struct xhci_data *xhci)
 {
-    cache_force_invalidate((void *) xhci->xer_ring.xer_enqueue_ptr,
+    hcd_dcache_invalidate(xhci->xer_ring.xer_enqueue_ptr,
             (size_t) (XHCI_EVENT_RING_SEG_LENGTH * sizeof(xhci_trb_t)));
     for (int i = 0; i < 10; i++)
     {
-        DEBUG(" ID --> %d", i);
-        DEBUG(" Address : %p", &xhci->xer_ring.xer_enqueue_ptr[i]);
-        DEBUG(" Buffer : %lx", xhci->xer_ring.xer_enqueue_ptr[i].buffer);
-        DEBUG(" Status : %x", xhci->xer_ring.xer_enqueue_ptr[i].status);
-        DEBUG(" Control : %x", xhci->xer_ring.xer_enqueue_ptr[i].control);
-        DEBUG(" TRB Value is : %d",
+        TU_LOG3(" ID --> %d", i);
+        TU_LOG3(" Address : %p", &xhci->xer_ring.xer_enqueue_ptr[i]);
+        TU_LOG3(" Buffer : %lx", xhci->xer_ring.xer_enqueue_ptr[i].buffer);
+        TU_LOG3(" Status : %x", xhci->xer_ring.xer_enqueue_ptr[i].status);
+        TU_LOG3(" Control : %x", xhci->xer_ring.xer_enqueue_ptr[i].control);
+        TU_LOG3(" TRB Value is : %d",
                 ((xhci->xer_ring.xer_enqueue_ptr[i].control) & 0xfc00U) >> 10);
     }
 }
@@ -73,7 +72,7 @@ void reset_xhci_port(uint8_t rhport)
              (0x10U * ((uint64_t) rhport - 1UL)));
 
     portsc->value |= USB3_PORTSC_20_PR_MASK;
-    INFO("xHCI port reset initiated on port : %d", rhport);
+    TU_LOG3("xHCI port reset initiated on port : %d", rhport);
 }
 
 bool is_xhci_port_reset_end(uint8_t rhport)
@@ -98,11 +97,11 @@ bool is_xhci_port_reset_end(uint8_t rhport)
 
     if (loop == 0U)
     {
-        ERROR("usb3 port reset failure");
+        TU_LOG1("usb3 port reset failure");
         return false;
     }
 
-    INFO("xHCI port reset completede on port : %d", rhport);
+    TU_LOG3("xHCI port reset completede on port : %d", rhport);
     return true;
 }
 
@@ -122,7 +121,7 @@ xhci_event_trb_t get_xhc_event(struct xhci_data *xhci_ptr)
             runtime->erdp_lo.value;
     erdp_addr &= 0xfffffff0UL;
 
-    cache_force_invalidate((void *)erdp_addr, sizeof(xhci_trb_t));
+    hcd_dcache_invalidate((void *) erdp_addr, sizeof(xhci_trb_t));
 
     xhci_trb_t *event_trb = (xhci_trb_t *)(uint64_t)erdp_addr;
 

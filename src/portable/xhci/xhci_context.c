@@ -43,12 +43,12 @@
  *                                        +------------------+             +---------------+
  */
 
+#include <string.h>
 #include "xhci.h"
-#include "socfpga_cache.h"
 #include "xhci_endpoints.h"
 #include "xhci_context.h"
 #include "xhci_events.h"
-#include "osal_log.h"
+#include "host/hcd.h"
 
 int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
 {
@@ -56,19 +56,19 @@ int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
     xhci_ptr->xcr_ring = alloc_command_ring();
     if (xhci_ptr->xcr_ring == NULL)
     {
-        ERROR("Cannot allocate memory!!!");
+        TU_LOG1("Cannot allocate memory!!!");
         ret = -ENOMEM;
     }
 
     if (alloc_input_device_context(xhci_ptr) != 0)
     {
-        ERROR("Cannot allocate memory!!!");
+        TU_LOG1("Cannot allocate memory!!!");
         ret = -ENOMEM;
     }
 
     if (alloc_output_device_context(xhci_ptr) != 0)
     {
-        ERROR("Cannot allocate memory!!!");
+        TU_LOG1("Cannot allocate memory!!!");
         ret = -ENOMEM;
     }
 
@@ -87,7 +87,7 @@ int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
             vPortFree((void *)xhci_ptr->op_ctx);
         }
     }
-    INFO("xHCI contexts allocated successfully");
+    TU_LOG3("xHCI contexts allocated successfully");
     return ret;
 }
 
@@ -120,7 +120,7 @@ void deallocate_xhci_context(struct xhci_data *xhci_ptr)
 
     xhci_ptr->dev_data.slot_id = 0U;
     xhci_ptr->dev_data.rh_port = 0U;
-    INFO("xHCI contexts deallocated successfully");
+    TU_LOG3("xHCI contexts deallocated successfully");
 }
 
 int init_xhci_context_params(struct xhci_data *xhci_ptr)
@@ -158,7 +158,7 @@ int alloc_input_device_context(struct xhci_data *xhci_ptr)
             sizeof(xhci_ip_device_context_t));
     if (xhci_ptr->ip_ctx == NULL)
     {
-        ERROR("Cannot allocate memory!!!");
+        TU_LOG1("Cannot allocate memory!!!");
         return -ENOMEM;
     }
 
@@ -198,24 +198,24 @@ int init_input_device_context(struct xhci_data *xhci_ptr)
     switch (dev_speed)
     {
         case 4:
-            PRINT("xHCI - SS device attached");
+            TU_LOG1("xHCI - SS device attached");
             ep0_max_pkt_size = EP0_MAX_PKT_SIZE_SS;
             break;
         case 3:
-            PRINT("xHCI - HS device attached");
+            TU_LOG1("xHCI - HS device attached");
             ep0_max_pkt_size = EP0_MAX_PKT_SIZE_HS;
             break;
         case 2:
-            PRINT("xHCI - LS device attached");
+            TU_LOG1("xHCI - LS device attached");
             ep0_max_pkt_size = EP0_MAX_PKT_SIZE_FS;
             break;
         case 1:
-            PRINT("xHCI - FS device attached");
+            TU_LOG1("xHCI - FS device attached");
             ep0_max_pkt_size = EP0_MAX_PKT_SIZE_LS;
             break;
         default:
             /* resource unavalable, try again */
-            PRINT("XHCI - Device enumeration failed");
+            TU_LOG1("XHCI - Device enumeration failed");
             ret = -EAGAIN;
             break;
     }
@@ -247,7 +247,7 @@ int init_input_device_context(struct xhci_data *xhci_ptr)
             EP_TRB_SEG_LENGTH);
     if (xep0_tr_ptr == NULL)
     {
-        ERROR("Cannot allocate memory!!!");
+        TU_LOG1("Cannot allocate memory!!!");
         return -ENOMEM;
     }
 
@@ -276,7 +276,7 @@ int alloc_output_device_context(struct xhci_data *xhci_ptr)
             sizeof(xhci_op_device_context_t));
     if (xhci_ptr->op_ctx == NULL)
     {
-        ERROR("Canot allocate memory!!!");
+        TU_LOG1("Canot allocate memory!!!");
         return -ENOMEM;
     }
 
@@ -345,7 +345,7 @@ int alloc_dcbaa(struct xhci_data *xhci_ptr)
 
     xhci->dcbaap_lo.value = (uint32_t) dcbaa;
     xhci->dcbaap_hi.value = (uint32_t) (dcbaa >> 32);
-    DEBUG("xHCI DCBAA register updated");
+    TU_LOG2("xHCI DCBAA register updated");
 
     return 0;
 }
@@ -379,12 +379,12 @@ void display_xhci_device_params(struct xhci_device_data *dev_data)
 {
     char const *dev_speed[] = {"Null", "Low Speed", "Full Speed", "High Speed"};
 
-    DEBUG("Device address : %d", dev_data->dev_addr);
-    DEBUG("Device Slot: %d", dev_data->slot_id);
-    DEBUG("Device rh port: %d", dev_data->rh_port);
-    DEBUG("Device speed : %s", dev_speed[dev_data->dev_speed]);
+    TU_LOG2("Device address : %d", dev_data->dev_addr);
+    TU_LOG2("Device Slot: %d", dev_data->slot_id);
+    TU_LOG2("Device rh port: %d", dev_data->rh_port);
+    TU_LOG2("Device speed : %s", dev_speed[dev_data->dev_speed]);
 
-    /* Suppressing unused variable warning when not using DEBUG logs. */
+    /* Suppressing unused variable warning when not using TU_LOG2 logs. */
     (void)dev_data;
     (void)dev_speed;
 }
@@ -431,41 +431,41 @@ void update_endpoint_packetsize(xhci_ip_device_context_t *ip_ctx,
 
 void display_ip_context(xhci_ip_device_context_t *ip_ctx)
 {
-    DEBUG(" Input control Contexts ");
-    DEBUG(" Field 1 : %lx", ip_ctx->xi_context.xic_context_flags);
+    TU_LOG2(" Input control Contexts ");
+    TU_LOG2(" Field 1 : %lx", ip_ctx->xi_context.xic_context_flags);
 
-    DEBUG(" Slot Contexts ");
-    DEBUG(" Field 1 : %lx", ip_ctx->xs_context.xsc_info1);
-    DEBUG(" Field 2 : %lx", ip_ctx->xs_context.xsc_info2);
+    TU_LOG2(" Slot Contexts ");
+    TU_LOG2(" Field 1 : %lx", ip_ctx->xs_context.xsc_info1);
+    TU_LOG2(" Field 2 : %lx", ip_ctx->xs_context.xsc_info2);
 
-    DEBUG(" Endpoint 0  Contexts ");
-    DEBUG(" Field 1 : %lx", ip_ctx->xe_context[0].xec_info);
-    DEBUG(" Field 2 : %lx", ip_ctx->xe_context[0].xec_dequeue);
-    DEBUG(" Field 3 : %lx", ip_ctx->xe_context[0].xec_info2);
+    TU_LOG2(" Endpoint 0  Contexts ");
+    TU_LOG2(" Field 1 : %lx", ip_ctx->xe_context[0].xec_info);
+    TU_LOG2(" Field 2 : %lx", ip_ctx->xe_context[0].xec_dequeue);
+    TU_LOG2(" Field 3 : %lx", ip_ctx->xe_context[0].xec_info2);
 
     (void)ip_ctx;
 }
 
 void display_op_context(xhci_op_device_context_t *op_ctx)
 {
-    DEBUG(" Slot Contexts ");
-    DEBUG(" Field 1 : %lx", op_ctx->slot_context.xsc_info1);
-    DEBUG(" Field 2 : %lx", op_ctx->slot_context.xsc_info2);
+    TU_LOG2(" Slot Contexts ");
+    TU_LOG2(" Field 1 : %lx", op_ctx->slot_context.xsc_info1);
+    TU_LOG2(" Field 2 : %lx", op_ctx->slot_context.xsc_info2);
 
-    DEBUG(" Endpoint 0  Contexts ");
-    DEBUG(" Field 1 : %lx", op_ctx->EP_0.xec_info);
-    DEBUG(" Field 2 : %lx", op_ctx->EP_0.xec_dequeue);
-    DEBUG(" Field 3 : %lx", op_ctx->EP_0.xec_info2);
+    TU_LOG2(" Endpoint 0  Contexts ");
+    TU_LOG2(" Field 1 : %lx", op_ctx->EP_0.xec_info);
+    TU_LOG2(" Field 2 : %lx", op_ctx->EP_0.xec_dequeue);
+    TU_LOG2(" Field 3 : %lx", op_ctx->EP_0.xec_info2);
 
-    DEBUG(" Endpoint 1 OUT  Contexts ");
-    DEBUG(" Field 1 : %lx", op_ctx->EP[0].xec_info);
-    DEBUG(" Field 2 : %lx", op_ctx->EP[0].xec_dequeue);
-    DEBUG(" Field 3 : %lx", op_ctx->EP[0].xec_info2);
+    TU_LOG2(" Endpoint 1 OUT  Contexts ");
+    TU_LOG2(" Field 1 : %lx", op_ctx->EP[0].xec_info);
+    TU_LOG2(" Field 2 : %lx", op_ctx->EP[0].xec_dequeue);
+    TU_LOG2(" Field 3 : %lx", op_ctx->EP[0].xec_info2);
 
-    DEBUG(" Endpoint 2 IN Contexts ");
-    DEBUG(" Field 1 : %lx", op_ctx->EP[3].xec_info);
-    DEBUG(" Field 2 : %lx", op_ctx->EP[3].xec_dequeue);
-    DEBUG(" Field 3 : %lx \r\n", op_ctx->EP[3].xec_info2);
+    TU_LOG2(" Endpoint 2 IN Contexts ");
+    TU_LOG2(" Field 1 : %lx", op_ctx->EP[3].xec_info);
+    TU_LOG2(" Field 2 : %lx", op_ctx->EP[3].xec_dequeue);
+    TU_LOG2(" Field 3 : %lx \r\n", op_ctx->EP[3].xec_info2);
 
     (void)op_ctx;
 }

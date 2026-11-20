@@ -53,7 +53,6 @@
   #include "xhci_endpoints.h"
   #include "xhci_interrupts.h"
   #include "xhci_doorbell.h"
-  #include "socfpga_cache.h"
 #endif
 
 typedef struct
@@ -142,7 +141,7 @@ static int configure_xhci_max_slots(void)
             (xhci->hcsparams1.value & USB3_HCSPARAMS1_MAXSLOTS_MASK) >>
             USB3_HCSPARAMS1_MAXSLOTS_POS;
 
-    DEBUG("MaxSlots is : %x", max_slots);
+    TU_LOG2("MaxSlots is : %x", max_slots);
 
     xhci->config.value =
             (xhci->config.value & ~USB3_CONFIG_MAXSLOTSEN_MASK) |
@@ -188,7 +187,7 @@ static int wait_for_controller_ready(void)
 
     if(loop > 0)
     {
-        INFO("xHCI Controller Ready");
+        TU_LOG3("xHCI Controller Ready");
         return 0;
     }
 
@@ -204,7 +203,7 @@ int xhci_reset(void)
     /* Reset the Host Controller */
     xhci->usbcmd.hcrst = 1U;
 
-    INFO("Initiating Controller Reset");
+    TU_LOG3("Initiating Controller Reset");
     do
     {
         if (xhci->usbcmd.hcrst == 0U)
@@ -219,11 +218,11 @@ int xhci_reset(void)
 
     if (err_flag == 0U)
     {
-        INFO("Timeout Occurred");
+        TU_LOG3("Timeout Occurred");
         return -ETIMEDOUT;
     }
 
-    INFO("xHCI controller reset successful");
+    TU_LOG3("xHCI controller reset successful");
     return 0;
 }
 
@@ -510,6 +509,18 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buf
   ep_data[ep_dci].buffer = buffer;
   ep_data[ep_dci].buflen = buflen;
 
+  if( buflen != 0 )
+  {
+    if( dir == TUSB_DIR_IN )
+    {
+      (void) hcd_dcache_invalidate(buffer, buflen);
+    }
+    else
+    {
+      (void) hcd_dcache_clean(buffer, buflen);
+    }
+  }
+
   if( ep_num == 0 )
   {
     configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t *)&ctrl_req);
@@ -517,10 +528,6 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buf
   }
   else
   {
-    if( dir == TUSB_DIR_OUT )
-    {
-      cache_force_write_back(buffer, buflen);
-    }
     endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
   }
 
@@ -542,15 +549,13 @@ static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr)
   uint32_t buflen = ep_data[ep_dci].buflen;
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_num = tu_edpt_number(ep_addr);
+  const bool data_in = (ep_num == 0) ?
+          ((ctrl_req.bmRequestType & TUSB_DIR_IN_MASK) != 0U) :
+          (dir == TUSB_DIR_IN);
 
-  if(ep_num == 0 && buflen != 0)
+  if( buflen != 0 && data_in )
   {
-    cache_force_invalidate(buffer, buflen);
-  }
-
-  if( dir == TUSB_DIR_IN )
-  {
-    cache_force_invalidate(buffer, buflen);
+    (void) hcd_dcache_invalidate(buffer, buflen);
   }
 
 }
@@ -685,7 +690,7 @@ bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t
 
   usb_endpoint_descriptor_t xhci_ep_desc;
 
-  DEBUG("Parsing Complete Configuration Descriptors");
+  TU_LOG2("Parsing Complete Configuration Descriptors");
 
   while (p_desc < desc_end)
   {
@@ -697,8 +702,8 @@ bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t
     /* Check if the device belongs to MSC */
     if (desc_itf->bInterfaceClass != 8)
     {
-      PRINT("Device does not support MSC");
-      PRINT("Enumeration process completed");
+      TU_LOG1("Device does not support MSC");
+      TU_LOG1("Enumeration process completed");
       return false;
     }
 

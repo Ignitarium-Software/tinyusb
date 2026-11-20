@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "xhci.h"
-#include "osal_log.h"
+#include "host/hcd.h"
 
 /*
  * @brief read the host controller capability registers
@@ -23,23 +23,23 @@ int get_xhc_cap_params(struct xhci_data *xhci)
 
     xhci->xhc_cap_ptr = (xhci_cap_reg_t *)USBBASE;
 
-    DEBUG("CAPLENGTH : %x",
+    TU_LOG2("CAPLENGTH : %x",
             (regs->caplength.value & USB3_CAPLENGTH_CAPLENGTH_MASK));
-    DEBUG("HCSPARAMS1 : %x",
+    TU_LOG2("HCSPARAMS1 : %x",
             regs->hcsparams1.value);
-    DEBUG("HCSPARAMS2 : %x",
+    TU_LOG2("HCSPARAMS2 : %x",
             regs->hcsparams2.value);
-    DEBUG("HCSPARAMS3 : %x",
+    TU_LOG2("HCSPARAMS3 : %x",
             regs->hcsparams3.value);
-    DEBUG("HCCPARAMS1 : %x",
+    TU_LOG2("HCCPARAMS1 : %x",
             regs->hccparams1.value);
-    DEBUG("DBOFF : %x",
+    TU_LOG2("DBOFF : %x",
             (regs->dboff.value &
              USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK));
-    DEBUG("RTOFF : %x",
+    TU_LOG2("RTOFF : %x",
             (regs->rtsoff.value &
              USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK));
-    DEBUG("HCCPARAMS2 : %x",
+    TU_LOG2("HCCPARAMS2 : %x",
             regs->hccparams2.value);
 
     xhci->op_regs.xhci_op_base = (uint64_t)USBBASE +
@@ -52,11 +52,11 @@ int get_xhc_cap_params(struct xhci_data *xhci)
             (uint64_t)(regs->dboff.value &
                        USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK);
 
-    DEBUG("Operational base : %lx ",
+    TU_LOG2("Operational base : %lx ",
             xhci->op_regs.xhci_op_base);
-    DEBUG("Runtime  base : %lx ",
+    TU_LOG2("Runtime  base : %lx ",
             xhci->op_regs.xhci_runtime_base);
-    DEBUG("Doorbell base : %lx ",
+    TU_LOG2("Doorbell base : %lx ",
             xhci->op_regs.xhci_db_base);
 
     return 0;

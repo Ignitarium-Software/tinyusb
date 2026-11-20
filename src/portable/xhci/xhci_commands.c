@@ -9,7 +9,7 @@
 
 #include "xhci_commands.h"
 #include "xhci_doorbell.h"
-#include "socfpga_cache.h"
+#include "host/hcd.h"
 #include "osal_log.h"
 
 xhci_trb_t *get_cmdring_enq_ptr(xcr_command_ring_t *cmd_ring)
@@ -59,8 +59,8 @@ void set_device_address(struct xhci_data *xhci_ptr)
     cmd_ctrl_flags |= xhci_ptr->xcr_ring->xcr_ccs_flag;
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xhci_ptr->xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xhci_ptr->xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     ring_xhci_host_db();
 }
@@ -97,8 +97,8 @@ void enable_slot_command(xcr_command_ring_t *xcr_ring)
 
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     /* call doorbell register */
     ring_xhci_host_db();
@@ -121,8 +121,8 @@ void disable_slot_command(xcr_command_ring_t *xcr_ring, uint32_t slotid)
 
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     /* call doorbell register */
     ring_xhci_host_db();
@@ -149,8 +149,8 @@ void configure_endpoint(struct xhci_data *xhci_ptr)
 
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xhci_ptr->xcr_ring->xcr_enqueue_ptr,
-            XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xhci_ptr->xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     ring_xhci_host_db();
 }
@@ -178,8 +178,8 @@ static void stop_endpoint_command(xcr_command_ring_t *xcr_ring)
 
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     ring_xhci_host_db();
 }
@@ -211,8 +211,8 @@ void update_ep_transfer_ring(xcr_command_ring_t *xcr_ring, xhci_trb_t *xtr_ring)
 
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     ring_xhci_host_db();
 }
@@ -238,8 +238,8 @@ void evaluate_endpoint(struct xhci_data *xhci_ptr)
     cmd_ctrl_flags |= xhci_ptr->xcr_ring->xcr_ccs_flag;
     enq_ptr->control = cmd_ctrl_flags;
 
-    cache_force_write_back((void *) xhci_ptr->xcr_ring->xcr_enqueue_ptr,
-            (size_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
+    hcd_dcache_clean(xhci_ptr->xcr_ring->xcr_enqueue_ptr,
+            (uint32_t) XHCI_CR_TRB_LEN * sizeof(xhci_trb_t));
 
     ring_xhci_host_db();
 }

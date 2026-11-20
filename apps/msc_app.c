@@ -83,7 +83,7 @@ bool msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const * c
 
 void tuh_msc_mount_cb(uint8_t dev_addr)
 {
-    PRINT("A MassStorage device mounted");
+    PRINT("\r\nA MassStorage device mounted");
 
     uint8_t const lun = 0;
     tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, msc_inquiry_complete_cb, 0);

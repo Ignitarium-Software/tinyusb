@@ -10,7 +10,7 @@
 #define __XCHI_CONTEXT_H__
 
 #include "xhci_type.h"
-#include "socfpga_defines.h"
+#include "stdbool.h"
 
 /* MASK and POS for Input control context */
 #define DCI_SLOT_CONTEXT            (1UL) /* !< Select slot context in Input control context */

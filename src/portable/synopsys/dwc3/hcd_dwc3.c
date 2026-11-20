@@ -33,6 +33,20 @@
 #include "dwc3_common.h"
 #include "xhci_api.h"
 
+#if CFG_TUH_MEM_DCACHE_ENABLE
+bool hcd_dcache_clean(void const* addr, uint32_t data_size) {
+  return dwc3_dcache_clean(addr, data_size);
+}
+
+bool hcd_dcache_invalidate(void const* addr, uint32_t data_size) {
+  return dwc3_dcache_invalidate(addr, data_size);
+}
+
+bool hcd_dcache_clean_invalidate(void const* addr, uint32_t data_size) {
+  return dwc3_dcache_clean_invalidate(addr, data_size);
+}
+#endif
+
 //--------------------------------------------------------------------+
 // Controller API
 //--------------------------------------------------------------------+

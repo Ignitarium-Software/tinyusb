@@ -11,7 +11,7 @@
 #include "xhci_interrupts.h"
 #include "socfpga_interrupt.h"
 #include "socfpga_interrupt_priority.h"
-#include "osal_log.h"
+#include "host/hcd.h"
 
 void socfpga_usb3_handler(void *handler);
 
@@ -59,11 +59,11 @@ bool register_usb3ISR(xhci_int_ptr_t int_handler)
     err = interrupt_enable(USB1IRQ, GIC_INTERRUPT_PRIORITY_USB3);
     if (err != 0)
     {
-        ERROR("Failed to enable interrupt");
+        TU_LOG1("Failed to enable interrupt");
         return false;
     }
 
-    INFO("Interrupt handler registered successfully");
+    TU_LOG3("Interrupt handler registered successfully");
     return true;
 }
 

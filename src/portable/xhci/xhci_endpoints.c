@@ -11,8 +11,7 @@
 #include "xhci.h"
 #include "xhci_endpoints.h"
 #include "xhci_rings.h"
-#include "osal_log.h"
-#include "socfpga_cache.h"
+#include "host/hcd.h"
 
 /**
  * @brief Setup the TRB with the control transfer data. For xHCI, control transfer consists of 3 stages.
@@ -78,7 +77,10 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
 
         /* TRB TYPE = 3 */
         end_ctrl_flags |= ((uint32_t)  DATA_STAGE_TRB << 10);
-        end_ctrl_flags |= ((uint32_t)  DATA_STAGE_DIR_IN << 16);
+        if ((setup_req->bmRequestType & TUSB_DIR_IN_MASK) != 0U)
+        {
+            end_ctrl_flags |= ((uint32_t) DATA_STAGE_DIR_IN << 16);
+        }
         end_ctrl_flags |= xhci->ep0.pcs_flag;
 
         ptr->control = end_ctrl_flags;
@@ -104,7 +106,7 @@ void configure_setup_stage(struct xhci_data *xhci, void *buffer,
 
     ptr->control = end_ctrl_flags;
 
-    cache_force_write_back((void *) xhci->ep0.ep_tr_enq_ptr,
+    hcd_dcache_clean(xhci->ep0.ep_tr_enq_ptr,
            EP_TRB_SEG_LENGTH * sizeof(xhci_trb_t));
 }
 
@@ -285,7 +287,7 @@ static void fill_endpoint_transfer_ring(struct ep_priv *ep_ctx, void *buffer,
     end_ctrl_flags |= (ep_ctx->pcs_flag);
 
     ptr->control = end_ctrl_flags;
-    cache_force_write_back((void *) ep_ctx->ep_tr_enq_ptr,
+    hcd_dcache_clean(ep_ctx->ep_tr_enq_ptr,
             EP_TRB_SEG_LENGTH * sizeof(xhci_trb_t));
 }
 
@@ -302,7 +304,7 @@ bool endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
     /* Out transfer */
     if (dir == 0U)
     {
-        INFO("Endpoint OUT transfer on endpoint - %d with bytes - %d ", ep_num,
+        TU_LOG3("Endpoint OUT transfer on endpoint - %d with bytes - %d ", ep_num,
                 buflen);
         fill_endpoint_transfer_ring(&xhci->msc_eps.ep_out, buffer, buflen);
         ring_xhci_ep_doorbell(&xhci->op_regs, db_target);
@@ -310,7 +312,7 @@ bool endpoint_transfer(struct xhci_data *xhci, int ep_num, uint8_t dir,
     /* In Transfer */
     else if (dir == 1U)
     {
-        INFO("Endpoint IN transfer on endpoint - %d with bytes - %d ", ep_num,
+        TU_LOG3("Endpoint IN transfer on endpoint - %d with bytes - %d ", ep_num,
                 buflen);
         fill_endpoint_transfer_ring(&xhci->msc_eps.ep_in, buffer, buflen);
         ring_xhci_ep_doorbell(&xhci->op_regs, db_target);
@@ -357,7 +359,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
                     EP_TRB_SEG_LENGTH);
             if (enq_ptr == NULL)
             {
-                ERROR("Canot allocate memory!!!");
+                TU_LOG1("Canot allocate memory!!!");
                 return -ENOMEM;
             }
 
@@ -398,7 +400,7 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
                     EP_TRB_SEG_LENGTH);
             if (enq_ptr == NULL)
             {
-                ERROR("Cannot allocate memory!!!");
+                TU_LOG1("Cannot allocate memory!!!");
                 return -ENOMEM;
             }
             xhci_ptr->msc_eps.ep_out.ep_tr_enq_ptr = enq_ptr;
