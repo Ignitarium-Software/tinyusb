@@ -18,6 +18,28 @@
 extern "C" {
 #endif
 
+
+/* xHCI register macros moved from socfpga_usb3_reg.h. */
+#define USBBASE                                      (0x11000000U)
+#define USB3_CAPLENGTH_CAPLENGTH_MASK                0x000000FFU
+#define USB3_HCSPARAMS1_MAXSLOTS_MASK                0x000000FFU
+#define USB3_HCSPARAMS1_MAXSLOTS_POS                 0U
+#define USB3_DBOFF_DOORBELL_ARRAY_OFFSET_MASK        0xFFFFFFFCU
+#define USB3_RTSOFF_RUNTIME_REG_SPACE_OFFSET_MASK    0xFFFFFFE0U
+#define USB3_CRCR_LO_CMD_RING_PNTR_MASK              0xFFFFFFC0U
+#define USB3_CONFIG_MAXSLOTSEN_MASK                  0x000000FFU
+#define USB3_PORTSC_20_PRC_MASK                      0x00200000U
+#define USB3_PORTSC_20_CSC_MASK                      0x00020000U
+#define USB3_PORTSC_20_PORTSPEED_MASK                0x00003C00U
+#define USB3_PORTSC_20_PORTSPEED_POS                 10U
+#define USB3_PORTSC_20_PR_MASK                       0x00000010U
+#define USB3_PORTSC_20_CCS_MASK                      0x00000001U
+#define USB3_PORTSC_30_WPR_MASK                 0x80000000U
+#define USB3_PORTSC_30_WRC_MASK                 0x00080000U
+#define USB3_ERSTSZ_ERS_TABLE_SIZE_MASK    0x0000FFFFU
+#define USB3_ERDP_LO_ERD_PNTR_MASK                                  0xFFFFFFF0U
+#define USB3_DB_DB_TARGET_POS                                       0U
+
 /* Bit fields of CAPLENGTH register. */
 typedef union {
   uint32_t value;

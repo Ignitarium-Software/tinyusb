@@ -9,7 +9,7 @@
 #ifndef __XCHI_CONTEXT_H__
 #define __XCHI_CONTEXT_H__
 
-#include "socfpga_usb3_reg.h"
+#include "xhci_type.h"
 #include "socfpga_defines.h"
 
 /* MASK and POS for Input control context */

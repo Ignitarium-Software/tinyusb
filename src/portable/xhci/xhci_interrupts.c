@@ -10,7 +10,6 @@
 #include "xhci.h"
 #include "xhci_interrupts.h"
 #include "socfpga_interrupt.h"
-#include "socfpga_usb3_reg.h"
 #include "socfpga_interrupt_priority.h"
 #include "osal_log.h"
 
