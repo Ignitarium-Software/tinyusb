@@ -311,16 +311,6 @@ int init_xhci_context_params(struct xhci_data *xhci_ptr);
 /* Generic xhci APIS */
 
 /**
- * @brief  function to check if the pointer address passed is byte aligned
- * @param[in]  ptr -  pointer to be checked byte aligned or not
- * @param[in]  byte - pointer byte alignment size
- * @return
- *  0  on successful allocation
- *  errno, incase of failure
- */
-int is_ptr_mem_aligned(uint64_t addr, uint32_t byte);
-
-/**
  * @brief  parse the endpoint descriptors
  * @param[in] xhci_ptr reference to xhci hcd structure
  * @param[in] desc endpoint descriptor
@@ -336,14 +326,6 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
  * @brief Display device info
  */
 void display_xhci_device_params(struct xhci_device_data *dev_data);
-
-/**
- * @brief  reset the xHCI controller
- * @return
- *  0, on success
- *  errno, on failure
- */
-int xhci_reset(void);
 
 /**
  * @brief  start the xHCI controller

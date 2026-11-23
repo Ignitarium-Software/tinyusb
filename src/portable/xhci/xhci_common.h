@@ -10,6 +10,7 @@
 #define __HCD_SOCFPGA_H__
 
 #include <stdio.h>
+#include "xhci_socfpga.h"
 #include "xhci.h"
 #include "xhci_events.h"
 #include <common/tusb_types.h>

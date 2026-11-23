@@ -34,10 +34,8 @@ extern "C" {
 #endif
 
 #if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
-  #define SOCFPGA_USB3_REG_BASE     (0x1100C100U)
+  #define SOCFPGA_DWC3_REG_BASE     (0x1100C100U)
   #define OTG_HS_IRQn               126 // IRQ num for USB1 = 126
-  #include "socfpga_interrupt.h"
-  #include "socfpga_interrupt_priority.h"
   #include "socfpga_rst_mngr.h"
   #include "socfpga_cache.h"
 #else
@@ -47,7 +45,7 @@ extern "C" {
 // On STM32 for consistency we associate
 // - Port0 to OTG_FS, and Port1 to OTG_HS
 static const dwc3_controller_t _dwc3_controller[] = {
-    { .reg_base = SOCFPGA_USB3_REG_BASE, .irqnum = OTG_HS_IRQn, },
+    { .reg_base = SOCFPGA_DWC3_REG_BASE, .irqnum = OTG_HS_IRQn, },
 };
 
 //------------- DCache -------------//

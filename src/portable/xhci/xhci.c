@@ -43,14 +43,6 @@
 #include "tusb_private.h"
 #include "xhci_common.h"
 
-#if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
-  #include "xhci_events.h"
-  #include "xhci_commands.h"
-  #include "xhci_endpoints.h"
-  #include "xhci_interrupts.h"
-  #include "xhci_doorbell.h"
-#endif
-
 typedef struct
 {
   uint8_t *buffer;
@@ -60,59 +52,10 @@ typedef struct
 #define XHCI_DCI_MAX 31
 hcd_dwc3_endpoint_t ep_data[XHCI_DCI_MAX];
 
-static void hcd_xhci_set_configuration();
-static void hcd_dwc3_update_device_address( uint8_t daddr );
-
-struct xhci_data xhci_handle __attribute__((aligned(64)));
-static struct xhci_int_desc usb3_int_desc;
+static struct xhci_data xhci_handle TU_ATTR_ALIGNED(64);
 static tusb_control_request_t ctrl_req;
 static int usb_set_config = 0;
 uint8_t device_addr = 0;
-
-int is_ptr_mem_aligned(uint64_t addr, uint32_t byte)
-{
-    uint64_t fact = 0UL;
-
-    /* Check if the address is byte aligned or not */
-    switch (byte)
-    {
-        case 8U:
-            fact = 0x7UL;
-            break;
-
-        case 16U:
-            fact = 0xFUL;
-            break;
-
-        case 32U:
-            fact = 0x1FUL;
-            break;
-
-        case 64U:
-            fact = 0x3FUL;
-            break;
-
-        case 128U:
-            fact = 0x7FUL;
-            break;
-
-        default:
-            fact = 0xFFUL;
-            break;
-    }
-
-    if (fact == 0xFFUL)
-    {
-        return ENOMEM;
-    }
-
-    if ((addr & fact) == 0UL)
-    {
-        return 0;
-    }
-
-    return -EIO;
-}
 
 static int configure_xhci_max_slots(void)
 {
@@ -175,7 +118,7 @@ static int wait_for_controller_ready(void)
     return -ETIMEDOUT;
 }
 
-int xhci_reset(void)
+static int xhci_reset(void)
 {
     volatile xhci_regs_t *xhci =
             (volatile xhci_regs_t *)(uintptr_t) USBBASE;
@@ -211,10 +154,7 @@ bool xhci_init()
 {
     int ret;
 
-    xhci_int_ptr_t usb3_int_ptr = &usb3_int_desc;
-
-    usb3_int_ptr->int_handler = tusb_int_handler;
-    if (register_usb3ISR(usb3_int_ptr) == false)
+    if (register_usb3ISR() == false)
     {
         return false;
     }
@@ -260,6 +200,36 @@ bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
   (void)daddr;
   (void)ep_addr;
   return true;
+}
+
+static void enable_xhci_interrupts(void)
+{
+    struct xhci_oper_reg_params op_regs;
+    volatile xhci_runtime_regs_t *runtime;
+    volatile xhci_regs_t *xhci;
+
+    op_regs = get_xhci_op_registers();
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+    xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+
+    runtime->iman.ie = 1U;
+    xhci->usbcmd.inte = 1U;
+}
+
+static void disable_xhci_interrupts(void)
+{
+
+    struct xhci_oper_reg_params op_regs;
+    volatile xhci_runtime_regs_t *runtime;
+    volatile xhci_regs_t *xhci;
+
+    op_regs = get_xhci_op_registers();
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+    xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+
+    runtime->iman.ie = 0U;
+    runtime->iman.ip = 0U;
+    xhci->usbcmd.inte = 0U;
 }
 
 void hcd_int_enable( uint8_t rhport )
@@ -541,6 +511,10 @@ static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr)
 
 }
 
+//--------------------------------------------------------------------
+// HCD Event Handler
+//--------------------------------------------------------------------
+
 void hcd_int_handler( uint8_t rhport, bool in_isr )
 {
   (void) rhport;
@@ -564,6 +538,21 @@ void hcd_int_handler( uint8_t rhport, bool in_isr )
   xhci_psceg_params_t rh_params;
 
   xhci_event_trb_t event_data;
+
+  volatile xhci_regs_t *xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+  struct xhci_oper_reg_params op_regs = get_xhci_op_registers();
+  volatile xhci_runtime_regs_t *runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+
+  if ((xhci->usbsts.hse != 0U) || (xhci->usbsts.hce != 0U))
+  {
+      (void) xhci_reset();
+      start_xhci_controller();
+      return;
+  }
+
+  // clear interrupt flags
+  xhci->usbsts.eint = 1U;
+  runtime->iman.ip = 1U;
 
   event_data = get_xhc_event(&xhci_handle);
 
@@ -620,42 +609,6 @@ void hcd_int_handler( uint8_t rhport, bool in_isr )
       break;
   }
 
-}
-
-bool hcd_evaluate_xhci_context( void )
-{
-  tusb_desc_device_t usb_desc;
-  TU_ASSERT(tuh_descriptor_get_device_local(device_addr, &usb_desc));
-  const uint16_t bcd_usb = usb_desc.bcdUSB;
-  uint16_t desc_max_pkt_size;
-  const uint16_t ep0_pkt_size =
-          (xhci_handle.ip_ctx->xe_context[ 0 ].xec_info &
-          ~EP_CTX_MAX_PKT_SIZE_MSK) >> EP_CTX_MAX_PKT_SIZE_POS;
-
-  if (bcd_usb >= 0x300U)
-  {
-    desc_max_pkt_size = (uint16_t) pow(2, usb_desc.bMaxPacketSize0);
-  }
-  else
-  {
-    desc_max_pkt_size = usb_desc.bMaxPacketSize0;
-  }
-
-  if (ep0_pkt_size != desc_max_pkt_size)
-  {
-    update_endpoint_packetsize(xhci_handle.ip_ctx, desc_max_pkt_size);
-
-    evaluate_endpoint(&xhci_handle);
-
-    if (wait_for_command_completion_event(&xhci_handle, EVALUATE_CONTEXT_CMD) != 0)
-    {
-      return false;
-    }
-
-    return true;
-  }
-
-  return true;
 }
 
 bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t rhport)

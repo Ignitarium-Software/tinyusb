@@ -78,7 +78,6 @@ set(SOCFPGA_DWC3_SRCS
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_doorbell.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_endpoints.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_events.c
-    ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_interrupts.c
     ${FREERTOS_TOP_DIR}/tinyusb/src/portable/xhci/xhci_rings.c
 )
 

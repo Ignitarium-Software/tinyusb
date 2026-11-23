@@ -35,6 +35,51 @@
  *              Transfer rings are associated with endpoints to carry out transfers.
  */
 
+static int is_ptr_mem_aligned(uint64_t addr, uint32_t byte)
+{
+    uint64_t fact = 0UL;
+
+    /* Check if the address is byte aligned or not */
+    switch (byte)
+    {
+        case 8U:
+            fact = 0x7UL;
+            break;
+
+        case 16U:
+            fact = 0xFUL;
+            break;
+
+        case 32U:
+            fact = 0x1FUL;
+            break;
+
+        case 64U:
+            fact = 0x3FUL;
+            break;
+
+        case 128U:
+            fact = 0x7FUL;
+            break;
+
+        default:
+            fact = 0xFFUL;
+            break;
+    }
+
+    if (fact == 0xFFUL)
+    {
+        return ENOMEM;
+    }
+
+    if ((addr & fact) == 0UL)
+    {
+        return 0;
+    }
+
+    return -EIO;
+}
+
 int xhci_crcr_init(xcr_command_ring_t *xcr_ring)
 {
     volatile xhci_regs_t *xhci = (volatile xhci_regs_t *)(uintptr_t) XHCI_REG_BASE;
