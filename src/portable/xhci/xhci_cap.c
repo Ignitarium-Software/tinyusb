@@ -7,9 +7,6 @@
  * Capabilities sub-module
  */
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include "xhci.h"
 #include "host/hcd.h"
 

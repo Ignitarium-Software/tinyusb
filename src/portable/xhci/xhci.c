@@ -32,15 +32,11 @@
 //--------------------------------------------------------------------+
 // INCLUDE
 //--------------------------------------------------------------------+
-#include "osal/osal.h"
-
 #include "host/hcd.h"
 #include "host/usbh.h"
 #include "host/usbh_pvt.h"
 
 #include "xhci.h"
-#include "osal.h"
-#include "osal_log.h"
 
 #include <math.h>
 #include "tusb.h"
@@ -72,21 +68,6 @@ static struct xhci_int_desc usb3_int_desc;
 static tusb_control_request_t ctrl_req;
 static int usb_set_config = 0;
 uint8_t device_addr = 0;
-
-
-//--------------------------------------------------------------------+
-// INCLUDE
-//--------------------------------------------------------------------+
-#include "osal/osal.h"
-
-#include "host/hcd.h"
-#include "host/usbh.h"
-#include "host/usbh_pvt.h"
-
-#include "xhci.h"
-#include "socfpga_defines.h"
-#include "osal.h"
-#include "osal_log.h"
 
 int is_ptr_mem_aligned(uint64_t addr, uint32_t byte)
 {
@@ -149,7 +130,7 @@ static int configure_xhci_max_slots(void)
 
     if ((xhci->config.value & USB3_CONFIG_MAXSLOTSEN_MASK) == 0U)
     {
-        ERROR("Max Slot Enable Bit Not configurred Correctly");
+        TU_LOG1("Max Slot Enable Bit Not configurred Correctly");
         return -EIO;
     }
     return 0;
@@ -241,7 +222,7 @@ bool xhci_init()
     ret = init_hcd_params();
     if (ret != 0)
     {
-        ERROR("hcd error -%d", ret);
+        TU_LOG1("hcd error -%d", ret);
         return false;
     }
 
@@ -258,7 +239,7 @@ bool xhci_init()
     ret = xhci_reset();
     if( ret != 0 )
     {
-        ERROR("xhci reset failed");
+        TU_LOG1("xhci reset failed");
         return  false;
     }
 
@@ -333,7 +314,7 @@ static bool hcd_send_address_cmd( void )
   ret = init_input_device_context(&xhci_handle);
   if (ret != 0)
   {
-    ERROR("XHCI Error -%d!!!", ret);
+    TU_LOG1("XHCI Error -%d!!!", ret);
     return false;
   }
 
@@ -429,7 +410,7 @@ void hcd_device_close(uint8_t rhport, uint8_t dev_addr)
     if (wait_for_command_completion_event(&xhci_handle,
             DISABLE_SLOT_CMD) != 0)
     {
-      ERROR("xHCI command failed");
+      TU_LOG1("xHCI command failed");
       return;
     }
 
@@ -747,7 +728,7 @@ bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t
 
       if (xhci_parse_endpoint_descriptor(&xhci_handle, &xhci_ep_desc) != 0)
       {
-        ERROR("Failed to parse endpoint descriptor");
+        TU_LOG1("Failed to parse endpoint descriptor");
         return false;
       }
       err_flag = 1U;

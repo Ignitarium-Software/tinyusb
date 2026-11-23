@@ -7,7 +7,6 @@
  * Events sub-module
  */
 
-#include <stdio.h>
 #include "xhci_events.h"
 #include "host/hcd.h"
 
@@ -28,6 +27,18 @@ void display_event_trbs(struct xhci_data *xhci)
         TU_LOG3(" TRB Value is : %d",
                 ((xhci->xer_ring.xer_enqueue_ptr[i].control) & 0xfc00U) >> 10);
     }
+}
+
+void update_device_rh_params(struct xhci_data *xhci_ptr,
+        xhci_psceg_params_t rh_params)
+{
+    xhci_ptr->dev_data.rh_port = (uint8_t) rh_params.rhport;
+}
+
+void update_device_dev_speed(struct xhci_data *xhci_ptr)
+{
+    xhci_ptr->dev_data.dev_speed = get_xhc_port_speed(
+            xhci_ptr->dev_data.rh_port);
 }
 
 uint8_t get_xhc_port_speed(uint8_t rhport)

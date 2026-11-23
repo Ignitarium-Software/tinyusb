@@ -47,7 +47,6 @@
 #include "xhci.h"
 #include "xhci_endpoints.h"
 #include "xhci_context.h"
-#include "xhci_events.h"
 #include "host/hcd.h"
 
 int alloc_xhci_contexts(struct xhci_data *xhci_ptr)
@@ -389,21 +388,9 @@ void display_xhci_device_params(struct xhci_device_data *dev_data)
     (void)dev_speed;
 }
 
-void update_device_dev_speed(struct xhci_data *xhci_ptr)
-{
-    xhci_ptr->dev_data.dev_speed = get_xhc_port_speed(
-            xhci_ptr->dev_data.rh_port);
-}
-
 void update_device_slot_id(struct xhci_device_data *dev_data, uint8_t slot_id)
 {
     dev_data->slot_id = slot_id;
-}
-
-void update_device_rh_params(struct xhci_data *xhci_ptr,
-        xhci_psceg_params_t rh_params)
-{
-    xhci_ptr->dev_data.rh_port = (uint8_t) rh_params.rhport;
 }
 
 void update_device_address(struct xhci_data *xhci_ptr)

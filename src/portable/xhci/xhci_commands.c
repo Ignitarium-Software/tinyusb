@@ -10,7 +10,6 @@
 #include "xhci_commands.h"
 #include "xhci_doorbell.h"
 #include "host/hcd.h"
-#include "osal_log.h"
 
 xhci_trb_t *get_cmdring_enq_ptr(xcr_command_ring_t *cmd_ring)
 {
