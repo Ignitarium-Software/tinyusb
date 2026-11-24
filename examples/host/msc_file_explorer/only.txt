@@ -20,3 +20,5 @@ mcu:STM32H7RS
 mcu:STM32N6
 family:samd21
 family:samd5x_e5x
+family:agilex5
+family:socfpga
