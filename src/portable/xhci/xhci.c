@@ -36,8 +36,6 @@
 #include "host/usbh.h"
 #include "host/usbh_pvt.h"
 
-#include "xhci.h"
-
 #include <math.h>
 #include "tusb.h"
 #include "tusb_private.h"
@@ -79,7 +77,7 @@ static int configure_xhci_max_slots(void)
     return 0;
 }
 
-void start_xhci_controller(void)
+static void start_xhci_controller(void)
 {
     volatile xhci_regs_t *xhci =
             (volatile xhci_regs_t *)(uintptr_t) USBBASE;
@@ -154,34 +152,18 @@ bool xhci_init()
 {
     int ret;
 
-    if (register_usb3ISR() == false)
-    {
-        return false;
-    }
+    TU_ASSERT((register_usb3ISR() == true));
 
-    ret = init_hcd_params();
-    if (ret != 0)
-    {
-        TU_LOG1("hcd error -%d", ret);
-        return false;
-    }
+    TU_ASSERT((init_hcd_params() == 0));
 
     //clear xHCI data structure members
     tu_memclr(&xhci_handle, sizeof(xhci_handle));
 
     get_xhc_cap_params(&xhci_handle);
 
-    if(wait_for_controller_ready() != 0)
-    {
-        return false;
-    }
+    TU_ASSERT((wait_for_controller_ready() == 0));
 
-    ret = xhci_reset();
-    if( ret != 0 )
-    {
-        TU_LOG1("xhci reset failed");
-        return  false;
-    }
+    TU_ASSERT((xhci_reset() == 0));
 
     configure_xhci_max_slots();
 

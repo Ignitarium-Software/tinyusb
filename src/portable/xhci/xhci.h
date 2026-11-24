@@ -327,17 +327,4 @@ int xhci_parse_endpoint_descriptor(struct xhci_data *xhci_ptr,
  */
 void display_xhci_device_params(struct xhci_device_data *dev_data);
 
-/**
- * @brief  start the xHCI controller
- */
-void start_xhci_controller(void);
-
-/**
- * @brief Initialize the xHCI registers
- * @return
- *  true on successful initialization
- *  false incase of failure
- */
-bool xhci_init();
-
 #endif  /*__XHCI_H__ */
