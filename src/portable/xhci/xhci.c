@@ -25,22 +25,21 @@
  * This file is part of the TinyUSB stack.
  */
 
+#include "tusb_option.h"
+
+#if CFG_TUH_ENABLED && defined(TUP_USBIP_XHCI)
+
+//--------------------------------------------------------------------+
+// INCLUDE
+//--------------------------------------------------------------------+
+#include "host/hcd.h"
+#include "host/usbh.h"
+#include "host/usbh_pvt.h"
+
 #include <math.h>
 #include "tusb.h"
-#include "host/hcd.h"
 #include "tusb_private.h"
-
-#if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
-  #include "socfpga_rst_mngr.h"
-  #include "dwc3.h"
-  #include "xhci_commands.h"
-  #include "xhci_endpoints.h"
-  #include "xhci_interrupts.h"
-  #include "xhci_doorbell.h"
-  #include "hcd_dwc3.h"
-  #include "osal_log.h"
-  #include "socfpga_cache.h"
-#endif
+#include "xhci_common.h"
 
 typedef struct
 {
@@ -51,62 +50,133 @@ typedef struct
 #define XHCI_DCI_MAX 31
 hcd_dwc3_endpoint_t ep_data[XHCI_DCI_MAX];
 
-static void hcd_xhci_set_configuration();
-static void hcd_dwc3_update_device_address( uint8_t daddr );
-
-struct xhci_data xhci_handle __attribute__((aligned(64)));
-static struct xhci_int_desc usb3_int_desc;
+static struct xhci_data xhci_handle TU_ATTR_ALIGNED(64);
 static tusb_control_request_t ctrl_req;
 static int usb_set_config = 0;
 uint8_t device_addr = 0;
 
-bool hcd_dwc3_init( uint8_t rhport, const tusb_rhport_init_t *rh_init )
+static int configure_xhci_max_slots(void)
 {
-  xhci_int_ptr_t usb3_int_ptr = &usb3_int_desc;
-  (void) rh_init;
-  int ret;
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+    uint32_t max_slots =
+            (xhci->hcsparams1.value & USB3_HCSPARAMS1_MAXSLOTS_MASK) >>
+            USB3_HCSPARAMS1_MAXSLOTS_POS;
 
-  if (rhport == SOCFPGA_USB3_SS_PORT)
-  {
-    usb3_int_ptr->int_handler = tusb_int_handler;
-    if (register_usb3ISR(usb3_int_ptr) == false)
+    TU_LOG2("MaxSlots is : %x", max_slots);
+
+    xhci->config.value =
+            (xhci->config.value & ~USB3_CONFIG_MAXSLOTSEN_MASK) |
+            max_slots;
+
+    if ((xhci->config.value & USB3_CONFIG_MAXSLOTSEN_MASK) == 0U)
     {
-        return false;
+        TU_LOG1("Max Slot Enable Bit Not configurred Correctly");
+        return -EIO;
+    }
+    return 0;
+}
+
+static void start_xhci_controller(void)
+{
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+
+    xhci->usbcmd.r_s = START_XHCI;
+}
+
+/*
+ * wait for the xhci controller to be ready
+ */
+static int wait_for_controller_ready(void)
+{
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+    volatile uint16_t loop = 100;
+
+    do
+    {
+        /* check for CNR flag */
+        if (xhci->usbsts.cnr == 0U)
+        {
+            break;
+        }
+
+        osal_task_delay(10);
+        --loop;
+
+    }while(loop > 0);
+
+    if(loop > 0)
+    {
+        TU_LOG3("xHCI Controller Ready");
+        return 0;
     }
 
-    if (rstmgr_deassert_reset(RST_USB1) != 0)
+    return -ETIMEDOUT;
+}
+
+static int xhci_reset(void)
+{
+    volatile xhci_regs_t *xhci =
+            (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+    volatile uint32_t err_flag = 0U, loop = 1000U;
+
+    /* Reset the Host Controller */
+    xhci->usbcmd.hcrst = 1U;
+
+    TU_LOG3("Initiating Controller Reset");
+    do
     {
-        ERROR("\r\n Unable to deassdert the usb3 reset \r\n");
-        return false;
+        if (xhci->usbcmd.hcrst == 0U)
+        {
+            err_flag = 1U;
+            break;
+        }
+        osal_task_delay(10);
+
+        --loop;
+    }while(loop > 0U);
+
+    if (err_flag == 0U)
+    {
+        TU_LOG3("Timeout Occurred");
+        return -ETIMEDOUT;
     }
 
-    ret = init_hcd_params();
-    if (ret != 0)
-    {
-        ERROR("hcd error -%d", ret);
-        return false;
-    }
+    TU_LOG3("xHCI controller reset successful");
+    return 0;
+}
 
-    ret = dwc3_init();
-    if (ret != 0)
-    {
-        ERROR("dwc3 Error -%d!!!", ret);
-        return false;
-    }
+bool xhci_init()
+{
+    int ret;
+
+    TU_ASSERT((register_usb3ISR() == true));
+
+    TU_ASSERT((init_hcd_params() == 0));
 
     //clear xHCI data structure members
     tu_memclr(&xhci_handle, sizeof(xhci_handle));
 
-    if( xhci_init(&xhci_handle) == false )
-    {
-      ERROR("xHCI init failed !!!");
-      return false;
-    }
-  }
+    get_xhc_cap_params(&xhci_handle);
 
-  return true;
+    TU_ASSERT((wait_for_controller_ready() == 0));
+
+    TU_ASSERT((xhci_reset() == 0));
+
+    configure_xhci_max_slots();
+
+    alloc_xhci_contexts(&xhci_handle);
+
+    init_xhci_context_params(&xhci_handle);
+
+    start_xhci_controller();
+
+    return true;
 }
-bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
+
+bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
 {
   (void)rhport;
   (void)daddr;
@@ -114,20 +184,43 @@ bool hcd_dwc3_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr)
   return true;
 }
 
-void hcd_dwc3_int_enable( uint8_t rhport )
+static void enable_xhci_interrupts(void)
 {
-  switch (rhport)
-  {
-    case SOCFPGA_USB3_HS_PORT:
-      enable_xhci_interrupts();
-      break;
+    struct xhci_oper_reg_params op_regs;
+    volatile xhci_runtime_regs_t *runtime;
+    volatile xhci_regs_t *xhci;
 
-    default: /* do nothing */
-      break;
-  }
+    op_regs = get_xhci_op_registers();
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+    xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+
+    runtime->iman.ie = 1U;
+    xhci->usbcmd.inte = 1U;
 }
 
-void hcd_dwc3_int_disable( uint8_t rhport )
+static void disable_xhci_interrupts(void)
+{
+
+    struct xhci_oper_reg_params op_regs;
+    volatile xhci_runtime_regs_t *runtime;
+    volatile xhci_regs_t *xhci;
+
+    op_regs = get_xhci_op_registers();
+    runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+    xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+
+    runtime->iman.ie = 0U;
+    runtime->iman.ip = 0U;
+    xhci->usbcmd.inte = 0U;
+}
+
+void hcd_int_enable( uint8_t rhport )
+{
+  if(rhport  == 1)
+    enable_xhci_interrupts();
+}
+
+void hcd_int_disable( uint8_t rhport )
 {
   (void) rhport;
   /* disable_xhci_interrupts(); */
@@ -136,7 +229,7 @@ void hcd_dwc3_int_disable( uint8_t rhport )
 /*--------------------------------------------------------------------+
  * Port API
  *--------------------------------------------------------------------+*/
-bool hcd_dwc3_port_connect_status( uint8_t rhport )
+bool hcd_port_connect_status( uint8_t rhport )
 {
   bool ret;
 
@@ -145,10 +238,10 @@ bool hcd_dwc3_port_connect_status( uint8_t rhport )
   return ret;
 }
 
-void hcd_dwc3_port_reset( uint8_t rhport )
+void hcd_port_reset( uint8_t rhport )
 {
-  (void) rhport;
-  reset_usb_port(rhport);
+  if(rhport == 1)
+    reset_xhci_port(rhport);
 }
 
 static bool hcd_enable_slot( void )
@@ -173,7 +266,7 @@ static bool hcd_send_address_cmd( void )
   ret = init_input_device_context(&xhci_handle);
   if (ret != 0)
   {
-    ERROR("XHCI Error -%d!!!", ret);
+    TU_LOG1("XHCI Error -%d!!!", ret);
     return false;
   }
 
@@ -207,17 +300,19 @@ static void hcd_dwc3_update_device_address( uint8_t daddr )
   device_addr = daddr;
 }
 
-void hcd_dwc3_port_reset_end( uint8_t rhport )
+void hcd_port_reset_end( uint8_t rhport )
 {
-  (void) rhport;
-  TU_ASSERT(usb_port_reset_end(rhport),);
+  if ( rhport == (uint32_t) SOCFPGA_USB3_HS_PORT )
+  {
+    is_xhci_port_reset_end(rhport);
+  }
 
   hcd_enable_slot();
 
   hcd_send_address_cmd();
 }
 
-tusb_speed_t hcd_dwc3_port_speed_get( uint8_t rhport )
+tusb_speed_t hcd_port_speed_get( uint8_t rhport )
 {
   uint8_t dev_speed;
   tusb_speed_t ret;
@@ -244,8 +339,12 @@ tusb_speed_t hcd_dwc3_port_speed_get( uint8_t rhport )
   return ret;
 }
 
-void hcd_dwc3_device_close( uint8_t rhport )
+void hcd_device_close(uint8_t rhport, uint8_t dev_addr)
 {
+  if (dev_addr == 0)
+    return;
+
+  (void)dev_addr;
   uint32_t slotid;
 
   if (rhport == SOCFPGA_USB3_SS_PORT)
@@ -263,7 +362,7 @@ void hcd_dwc3_device_close( uint8_t rhport )
     if (wait_for_command_completion_event(&xhci_handle,
             DISABLE_SLOT_CMD) != 0)
     {
-      ERROR("xHCI command failed");
+      TU_LOG1("xHCI command failed");
       return;
     }
 
@@ -293,7 +392,7 @@ static void hcd_xhci_set_configuration()
   }
 }
 
-bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
+bool hcd_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_packet[ 8 ] )
 {
   (void)rhport;
   memcpy(&ctrl_req, &setup_packet[0], sizeof(ctrl_req));
@@ -313,7 +412,7 @@ bool hcd_dwc3_setup_send( uint8_t rhport, uint8_t daddr, uint8_t const setup_pac
   return true;
 }
 
-bool hcd_dwc3_edpt_open( uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t const *ep_desc )
+bool hcd_edpt_open( uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t const *ep_desc )
 {
   (void) rhport;
   (void) daddr;
@@ -322,7 +421,7 @@ bool hcd_dwc3_edpt_open( uint8_t rhport, uint8_t daddr, tusb_desc_endpoint_t con
   return true;
 }
 
-bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen)
+bool hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t * buffer, uint32_t buflen)
 {
   const uint8_t ep_num = tu_edpt_number(ep_addr);
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
@@ -343,6 +442,18 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   ep_data[ep_dci].buffer = buffer;
   ep_data[ep_dci].buflen = buflen;
 
+  if( buflen != 0 )
+  {
+    if( dir == TUSB_DIR_IN )
+    {
+      (void) hcd_dcache_invalidate(buffer, buflen);
+    }
+    else
+    {
+      (void) hcd_dcache_clean(buffer, buflen);
+    }
+  }
+
   if( ep_num == 0 )
   {
     configure_setup_stage(&xhci_handle, buffer, (usb_control_request_t *)&ctrl_req);
@@ -350,17 +461,13 @@ bool hcd_dwc3_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t 
   }
   else
   {
-    if( dir == TUSB_DIR_OUT )
-    {
-      cache_force_write_back(buffer, buflen);
-    }
     endpoint_transfer(&xhci_handle, (int) ep_num, (uint8_t) dir, buffer, buflen);
   }
 
   return true;
 }
 
-bool hcd_dwc3_edpt_abort_xfer( uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr )
+bool hcd_edpt_abort_xfer( uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr )
 {
   (void) rhport;
   (void) dev_addr;
@@ -375,20 +482,22 @@ static void handle_endpoint_transfer(uint8_t ep_dci, uint8_t ep_addr)
   uint32_t buflen = ep_data[ep_dci].buflen;
   const unsigned dir = (uint32_t) tu_edpt_dir(ep_addr);
   const uint8_t ep_num = tu_edpt_number(ep_addr);
+  const bool data_in = (ep_num == 0) ?
+          ((ctrl_req.bmRequestType & TUSB_DIR_IN_MASK) != 0U) :
+          (dir == TUSB_DIR_IN);
 
-  if(ep_num == 0 && buflen != 0)
+  if( buflen != 0 && data_in )
   {
-    cache_force_invalidate(buffer, buflen);
-  }
-
-  if( dir == TUSB_DIR_IN )
-  {
-    cache_force_invalidate(buffer, buflen);
+    (void) hcd_dcache_invalidate(buffer, buflen);
   }
 
 }
 
-void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
+//--------------------------------------------------------------------
+// HCD Event Handler
+//--------------------------------------------------------------------
+
+void hcd_int_handler( uint8_t rhport, bool in_isr )
 {
   (void) rhport;
   /*
@@ -411,6 +520,21 @@ void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
   xhci_psceg_params_t rh_params;
 
   xhci_event_trb_t event_data;
+
+  volatile xhci_regs_t *xhci = (volatile xhci_regs_t *)(uintptr_t) USBBASE;
+  struct xhci_oper_reg_params op_regs = get_xhci_op_registers();
+  volatile xhci_runtime_regs_t *runtime = (volatile xhci_runtime_regs_t *)(uintptr_t) op_regs.xhci_runtime_base;
+
+  if ((xhci->usbsts.hse != 0U) || (xhci->usbsts.hce != 0U))
+  {
+      (void) xhci_reset();
+      start_xhci_controller();
+      return;
+  }
+
+  // clear interrupt flags
+  xhci->usbsts.eint = 1U;
+  runtime->iman.ip = 1U;
 
   event_data = get_xhc_event(&xhci_handle);
 
@@ -469,43 +593,9 @@ void hcd_dwc3_int_handler( uint8_t rhport, bool in_isr )
 
 }
 
-bool hcd_evaluate_xhci_context( void )
+bool hcd_parse_full_conf_descriptor(tusb_desc_configuration_t *desc_cfg, uint8_t rhport)
 {
-  tusb_desc_device_t usb_desc;
-  TU_ASSERT(tuh_descriptor_get_device_local(device_addr, &usb_desc));
-  const uint16_t bcd_usb = usb_desc.bcdUSB;
-  uint16_t desc_max_pkt_size;
-  const uint16_t ep0_pkt_size =
-          (xhci_handle.ip_ctx->xe_context[ 0 ].xec_info &
-          ~EP_CTX_MAX_PKT_SIZE_MSK) >> EP_CTX_MAX_PKT_SIZE_POS;
-
-  if (bcd_usb >= 0x300U)
-  {
-    desc_max_pkt_size = (uint16_t) pow(2, usb_desc.bMaxPacketSize0);
-  }
-  else
-  {
-    desc_max_pkt_size = usb_desc.bMaxPacketSize0;
-  }
-
-  if (ep0_pkt_size != desc_max_pkt_size)
-  {
-    update_endpoint_packetsize(xhci_handle.ip_ctx, desc_max_pkt_size);
-
-    evaluate_endpoint(&xhci_handle);
-
-    if (wait_for_command_completion_event(&xhci_handle, EVALUATE_CONTEXT_CMD) != 0)
-    {
-      return false;
-    }
-
-    return true;
-  }
-
-  return true;
-}
-bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
-{
+  (void) rhport;
   const uint8_t usb_speed = xhci_handle.dev_data.dev_speed;
 
   uint16_t const total_len = tu_le16toh(desc_cfg->wTotalLength);
@@ -516,7 +606,7 @@ bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
 
   usb_endpoint_descriptor_t xhci_ep_desc;
 
-  DEBUG("Parsing Complete Configuration Descriptors");
+  TU_LOG2("Parsing Complete Configuration Descriptors");
 
   while (p_desc < desc_end)
   {
@@ -528,8 +618,8 @@ bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
     /* Check if the device belongs to MSC */
     if (desc_itf->bInterfaceClass != 8)
     {
-      PRINT("Device does not support MSC");
-      PRINT("Enumeration process completed");
+      TU_LOG1("Device does not support MSC");
+      TU_LOG1("Enumeration process completed");
       return false;
     }
 
@@ -573,7 +663,7 @@ bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
 
       if (xhci_parse_endpoint_descriptor(&xhci_handle, &xhci_ep_desc) != 0)
       {
-        ERROR("Failed to parse endpoint descriptor");
+        TU_LOG1("Failed to parse endpoint descriptor");
         return false;
       }
       err_flag = 1U;
@@ -589,3 +679,5 @@ bool hcd_dwc3_parse_full_conf_descriptor( tusb_desc_configuration_t *desc_cfg )
 
   return true;
 }
+
+#endif

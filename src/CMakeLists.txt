@@ -25,6 +25,7 @@ function(tinyusb_target_add TARGET)
     # host
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/host/usbh.c
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/host/hub.c
+    ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/host/hcd_multi.c
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/class/cdc/cdc_host.c
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/class/hid/hid_host.c
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/class/midi/midi_host.c
@@ -38,4 +39,16 @@ function(tinyusb_target_add TARGET)
     # TODO for net driver, should be removed/changed
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../lib/networking
     )
+endfunction()
+
+# CFG_TUH_HCD_MULTI: add the sources of one host controller driver instance to TARGET, compiled with
+# TUH_HCD_NAME=<NAME> and host/hcd_rename.h force-included (renames its hcd_* API to hcd_<NAME>_*).
+# Pass every source of the driver, including helper sources. See src/host/hcd_rename.h.
+#   tinyusb_hcd_multi_add(<TARGET> <NAME> <source>...)
+function(tinyusb_hcd_multi_add TARGET NAME)
+  set(_srcs ${ARGN})
+  target_sources(${TARGET} PRIVATE ${_srcs})
+  set_property(SOURCE ${_srcs} APPEND PROPERTY COMPILE_DEFINITIONS TUH_HCD_NAME=${NAME})
+  set_property(SOURCE ${_srcs} APPEND PROPERTY COMPILE_OPTIONS
+    -include ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/host/hcd_rename.h)
 endfunction()

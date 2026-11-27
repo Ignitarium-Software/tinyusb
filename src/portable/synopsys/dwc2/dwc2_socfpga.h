@@ -31,16 +31,15 @@
 extern "C" {
 #endif
 
-// EP_MAX       : Max number of bi-directional endpoints including EP0
-// EP_FIFO_SIZE : Size of dedicated USB SRAM
 #if CFG_TUSB_MCU == OPT_MCU_SOCFPGA
-  #include "socfpga_usb_otg_reg.h"
+  #include "socfpga_rst_mngr.h"
   #include "socfpga_interrupt.h"
   #include "socfpga_cache.h"
   #include "socfpga_gpio.h"
   #include "osal_log.h"
   //toggle gpio for usb2 reset
-  #define USB_GPIO_TOGGLE 0
+  #define USB_GPIO_TOGGLE 1
+  #define USBOTG_BASE_ADDR (0x10B00000U)
 #else
   #error "Unsupported MCUs"
 #endif
@@ -184,6 +183,58 @@ static inline void dwc2_phy_update(dwc2_regs_t* dwc2, uint8_t hs_phy_type) {
     // Turnaround timeout depends on the AHB clock dictated by STM32 Reference Manual
   }
 }
+
+#if( USB_GPIO_TOGGLE == 1 )
+static inline bool is_pin_gpio(uint8_t pin)
+{
+  uint32_t val;
+  val = RD_REG32(PINMUX_REG(pin));
+  val &= PINMUX_MASK;
+  return (val == PINMUX_GPIO);
+}
+
+/*
+ * @brief Configure the pin as gpio in pinmux
+ */
+static inline void config_pinmux(uint8_t pin)
+{
+  uint32_t reg_val;
+  if (is_pin_gpio(pin) == false)
+  {
+    /* Change pin functionality to gpio */
+    reg_val = RD_REG32(PINMUX_REG(pin));
+    reg_val = (reg_val & ~PINMUX_MASK) | PINMUX_GPIO;
+    WR_REG32(PINMUX_REG(pin), reg_val);
+  }
+}
+
+// gpio reset for socfpga usb2 controller
+static inline int usb2_gpio_reset()
+{
+  #define GPIO_USB_RESET GPIO1_PIN4
+
+  gpio_handle_t led;
+  int led_config = GPIO_DIR_OUT;
+  int ret;
+
+  config_pinmux(GPIO_USB_RESET);
+  led = gpio_open(GPIO_USB_RESET);
+
+  ret = gpio_ioctl(led, SET_GPIO_DIR, &led_config);
+
+  if( ret != 0 )
+  {
+    gpio_close(led);
+    return -1;
+  }
+
+  gpio_write_sync(led, 1);
+
+  osal_task_delay(10);
+
+  return 0;
+}
+#endif
 
 //------------- DCache -------------//
 #if CFG_TUD_MEM_DCACHE_ENABLE || CFG_TUH_MEM_DCACHE_ENABLE
