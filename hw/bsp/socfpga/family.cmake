@@ -174,13 +174,14 @@ if (TARGET socfpga_drivers)
   target_link_libraries(agilex5-tinyusb PRIVATE socfpga_drivers m)
 endif ()
 
+set(TINYUSB_WARNS -Wno-unused-function -Wno-missing-prototypes -Wno-strict-prototypes -Wno-old-style-declaration -Wno-undef -Wno-unused-variable -Wno-redundant-decls)
+
 function(family_configure_host_example TARGET RTOS)
   socfpga_add_sdk()
   family_configure_common(${TARGET} ${RTOS})
 
   target_sources(${TARGET} PRIVATE
     ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/family.c
-    ${SOCFPGA_SDK_SOURCE_DIR}/FreeRTOS/portable/GCC/ARM_AARCH64/portStandardLib.c
   )
   target_include_directories(${TARGET} PUBLIC
     ${TINYUSB_TOP}/hw
@@ -198,6 +199,8 @@ function(family_configure_host_example TARGET RTOS)
     SOCFPGA_USB3_HS_PORT=1
     SOCFPGA_USB3_SS_PORT=2
   )
+
+  target_compile_options(${TARGET} PUBLIC ${DEFAULT_C_FLAGS_DEBUG} ${TINYUSB_WARNS})
 
   family_add_tinyusb(${TARGET} OPT_MCU_SOCFPGA)
   socfpga_add_hcd_sources(${TARGET})
